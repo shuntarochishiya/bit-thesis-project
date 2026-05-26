@@ -407,6 +407,121 @@ Generate the final game narration in English only.
 
         return final_text
 
+class ExecutionLogger:
+    """
+    This class records the internal execution process of the system.
+    It is useful for debugging and for demonstrating that the system uses
+    a structured agent-based execution pipeline instead of a direct chatbot call.
+    """
+
+    def __init__(self):
+        self.logs = []
+
+    def start_turn(self, player_input: str, state_before: Dict[str, Any]):
+        log_entry = {
+            "player_input": player_input,
+            "recognized_intent": None,
+            "execution_dag": [],
+            "executed_tasks": [],
+            "state_before": state_before,
+            "state_after": None,
+            "state_changes": {},
+            "memory_event": None,
+            "final_response": None
+        }
+
+        self.logs.append(log_entry)
+
+    def set_intent(self, intent: str):
+        self.logs[-1]["recognized_intent"] = intent
+
+    def set_dag(self, plan: List[Dict[str, Any]]):
+        self.logs[-1]["execution_dag"] = [
+            {
+                "task_id": task["task_id"],
+                "depends_on": task["depends_on"],
+                "agent": task["agent"],
+                "fallback": task.get("fallback")
+            }
+            for task in plan
+        ]
+
+    def add_executed_task(self, task_id: str, agent_type: str):
+        self.logs[-1]["executed_tasks"].append({
+            "task_id": task_id,
+            "agent": agent_type
+        })
+
+    def set_memory_event(self, memory_event: str):
+        self.logs[-1]["memory_event"] = memory_event
+
+    def finish_turn(self, state_after: Dict[str, Any], final_response: str):
+        self.logs[-1]["state_after"] = state_after
+        self.logs[-1]["final_response"] = final_response
+        self.logs[-1]["state_changes"] = self.calculate_state_changes(
+            self.logs[-1]["state_before"],
+            state_after
+        )
+
+    def calculate_state_changes(
+        self,
+        state_before: Dict[str, Any],
+        state_after: Dict[str, Any]
+    ) -> Dict[str, Any]:
+
+        changes = {}
+
+        for key in state_after:
+            before_value = state_before.get(key)
+            after_value = state_after.get(key)
+
+            if before_value != after_value:
+                changes[key] = {
+                    "before": before_value,
+                    "after": after_value
+                }
+
+        return changes
+
+    def get_last_log(self) -> Dict[str, Any]:
+        if not self.logs:
+            return {}
+
+        return self.logs[-1]
+
+    def display_last_log(self):
+        if not self.logs:
+            print("No execution logs available.")
+            return
+
+        log = self.logs[-1]
+
+        print("\n--- Execution Log ---")
+        print(f"Player input: {log['player_input']}")
+        print(f"Recognized intent: {log['recognized_intent']}")
+
+        print("\nExecution DAG:")
+        for task in log["execution_dag"]:
+            print(
+                f"- {task['task_id']} | agent: {task['agent']} | "
+                f"depends on: {task['depends_on']} | fallback: {task['fallback']}"
+            )
+
+        print("\nExecuted tasks:")
+        for task in log["executed_tasks"]:
+            print(f"- {task['task_id']} by {task['agent']}")
+
+        print("\nState changes:")
+        if log["state_changes"]:
+            for key, value in log["state_changes"].items():
+                print(f"- {key}: {value['before']} -> {value['after']}")
+        else:
+            print("- No state changes")
+
+        print(f"\nMemory event: {log['memory_event']}")
+        print(f"\nFinal response: {log['final_response']}")
+        print("---------------------\n")
+
 # =========================
 # 9. EXECUTION ENGINE
 # =========================
@@ -421,6 +536,7 @@ class ExecutionEngine:
         self,
         game_state_manager: GameStateManager,
         memory_system: MemorySystem,
+        execution_logger: ExecutionLogger,
         combat_agent: CombatAgent,
         persuasion_agent: PersuasionAgent,
         exploration_agent: ExplorationAgent,
@@ -428,6 +544,7 @@ class ExecutionEngine:
     ):
         self.game_state_manager = game_state_manager
         self.memory_system = memory_system
+        self.execution_logger = execution_logger
         self.combat_agent = combat_agent
         self.persuasion_agent = persuasion_agent
         self.exploration_agent = exploration_agent
@@ -440,6 +557,8 @@ class ExecutionEngine:
         for task in plan:
             task_id = task["task_id"]
             agent_type = task["agent"]
+
+            self.execution_logger.add_executed_task(task_id, agent_type)
 
             # Check dependencies
             dependencies = task["depends_on"]
@@ -473,6 +592,7 @@ class ExecutionEngine:
             elif agent_type == "memory":
                 memory_event = f"Player input: {player_input}. System result: {execution_result}"
                 self.memory_system.add_event(memory_event)
+                self.execution_logger.set_memory_event(memory_event)
                 completed_tasks[task_id] = "Memory updated."
 
             elif agent_type == "narrative":
@@ -485,6 +605,11 @@ class ExecutionEngine:
                     game_state=final_state,
                     execution_result=execution_result,
                     memory_events=recent_memory
+                )
+
+                self.execution_logger.finish_turn(
+                    state_after=final_state,
+                    final_response=narrative
                 )
 
                 completed_tasks[task_id] = narrative
@@ -506,6 +631,7 @@ class OrchestrationAgent:
     def __init__(self):
         self.game_state_manager = GameStateManager()
         self.memory_system = MemorySystem()
+        self.execution_logger = ExecutionLogger()
 
         self.intent_agent = IntentRecognitionAgent()
         self.task_planner = TaskPlanner()
@@ -522,6 +648,7 @@ class OrchestrationAgent:
         self.execution_engine = ExecutionEngine(
             game_state_manager=self.game_state_manager,
             memory_system=self.memory_system,
+            execution_logger=self.execution_logger,
             combat_agent=self.combat_agent,
             persuasion_agent=self.persuasion_agent,
             exploration_agent=self.exploration_agent,
@@ -529,10 +656,16 @@ class OrchestrationAgent:
         )
 
     def process_player_input(self, player_input: str) -> str:
+        state_before = self.game_state_manager.get_state()
+        self.execution_logger.start_turn(player_input, state_before)
+
         intent_data = self.intent_agent.recognize_intent(player_input)
         intent = intent_data["intent"]
 
+        self.execution_logger.set_intent(intent)
+
         plan = self.task_planner.build_plan(intent)
+        self.execution_logger.set_dag(plan)
 
         print("\n[DEBUG] Recognized intent:", intent)
         print("[DEBUG] Execution DAG:")
@@ -550,6 +683,8 @@ class OrchestrationAgent:
     def show_state(self):
         self.game_state_manager.display_state()
 
+    def show_last_log(self):
+        self.execution_logger.display_last_log()
 
 # =========================
 # 11. MAIN GAME LOOP
@@ -561,7 +696,8 @@ def main():
     print("🎮 DynAgentGame — Hierarchical Agent Prototype")
     print("Local LLM: Ollama")
     print("Type 'exit' to quit.")
-    print("Type 'state' to see the current game state.\n")
+    print("Type 'state' to see the current game state.")
+    print("Type 'log' to see the last execution log.\n")
 
     while True:
         player_input = input("Player: ")
@@ -572,6 +708,10 @@ def main():
 
         if player_input.lower() in ["state", "статус", "состояние"]:
             game.show_state()
+            continue
+
+        if player_input.lower() in ["log", "last log", "execution log"]:
+            game.show_last_log()
             continue
 
         response = game.process_player_input(player_input)
