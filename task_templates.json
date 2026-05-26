@@ -1,0 +1,85 @@
+{
+  "combat_action": [
+    {
+      "task_id": "validate_action",
+      "depends_on": [],
+      "agent": "validation",
+      "fallback": "cancel_action"
+    },
+    {
+      "task_id": "execute_combat",
+      "depends_on": ["validate_action"],
+      "agent": "combat",
+      "fallback": "safe_combat_response"
+    },
+    {
+      "task_id": "update_memory",
+      "depends_on": ["execute_combat"],
+      "agent": "memory",
+      "fallback": "skip_memory_update"
+    },
+    {
+      "task_id": "generate_narrative",
+      "depends_on": ["execute_combat", "update_memory"],
+      "agent": "narrative",
+      "fallback": "basic_narrative"
+    }
+  ],
+
+  "persuasion_action": [
+    {
+      "task_id": "validate_action",
+      "depends_on": [],
+      "agent": "validation",
+      "fallback": "cancel_action"
+    },
+    {
+      "task_id": "execute_persuasion",
+      "depends_on": ["validate_action"],
+      "agent": "persuasion",
+      "fallback": "safe_persuasion_response"
+    },
+    {
+      "task_id": "update_memory",
+      "depends_on": ["execute_persuasion"],
+      "agent": "memory",
+      "fallback": "skip_memory_update"
+    },
+    {
+      "task_id": "generate_narrative",
+      "depends_on": ["execute_persuasion", "update_memory"],
+      "agent": "narrative",
+      "fallback": "basic_narrative"
+    }
+  ],
+
+  "exploration_action": [
+    {
+      "task_id": "execute_exploration",
+      "depends_on": [],
+      "agent": "exploration",
+      "fallback": "safe_exploration_response"
+    },
+    {
+      "task_id": "update_memory",
+      "depends_on": ["execute_exploration"],
+      "agent": "memory",
+      "fallback": "skip_memory_update"
+    },
+    {
+      "task_id": "generate_narrative",
+      "depends_on": ["execute_exploration", "update_memory"],
+      "agent": "narrative",
+      "fallback": "basic_narrative"
+    }
+  ],
+
+  "general_action": [
+    {
+      "task_id": "generate_narrative",
+      "depends_on": [],
+      "agent": "narrative",
+      "fallback": "basic_narrative"
+    }
+  ]
+}
