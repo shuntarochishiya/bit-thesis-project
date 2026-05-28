@@ -36,7 +36,7 @@
     {
       "task_id": "execute_persuasion",
       "depends_on": ["validate_action"],
-      "agent": "persuasion",
+      "agent": "кpersuasion",
       "fallback": "safe_persuasion_response"
     },
     {
@@ -74,10 +74,58 @@
     }
   ],
 
-  "general_action": [
+  "dialogue_action": [
+  {
+    "task_id": "execute_dialogue",
+    "depends_on": [],
+    "agent": "dialogue",
+    "fallback": "safe_dialogue_response"
+  },
+  {
+    "task_id": "update_memory",
+    "depends_on": ["execute_dialogue"],
+    "agent": "memory",
+    "fallback": "skip_memory_update"
+  },
+  {
+    "task_id": "generate_narrative",
+    "depends_on": ["execute_dialogue", "update_memory"],
+    "agent": "narrative",
+    "fallback": "basic_narrative"
+  }
+],
+
+  "tavern_action": [
+    {
+      "task_id": "execute_tavern_action",
+      "depends_on": [],
+      "agent": "tavern",
+      "fallback": "safe_tavern_response"
+    },
+    {
+      "task_id": "update_memory",
+      "depends_on": ["execute_tavern_action"],
+      "agent": "memory",
+      "fallback": "skip_memory_update"
+    },
     {
       "task_id": "generate_narrative",
+      "depends_on": ["execute_tavern_action", "update_memory"],
+      "agent": "narrative",
+      "fallback": "basic_narrative"
+    }
+  ],
+
+  "general_action": [
+    {
+      "task_id": "update_memory",
       "depends_on": [],
+      "agent": "memory",
+      "fallback": "skip_memory_update"
+    },
+    {
+      "task_id": "generate_narrative",
+      "depends_on": ["update_memory"],
       "agent": "narrative",
       "fallback": "basic_narrative"
     }
