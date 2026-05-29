@@ -1,18 +1,30 @@
 [
   {
-    "timestamp": "2026-05-27T17:17:34",
-    "player_input": "I enter the tavern and greet a bartender with a short wave. I ask him if anything weird happened recently ",
+    "timestamp": "2026-05-28T19:36:57",
+    "player_input": "I enter a tavern and greet the barmaid with a flirty wink",
     "intent": "tavern_action",
     "target": "bartender",
-    "system_result": "The bartender quietly warns that not everyone in the tavern can be trusted.",
+    "system_result": "The tavern is noisy, warm, and full of tired travelers. The bartender waits behind the counter.",
     "state_changes": {
-      "bartender_mood": {
-        "before": "neutral",
-        "after": "talkative"
+      "bartender_role": {
+        "before": "bartender",
+        "after": "barmaid"
       },
-      "relationship_with_bartender": {
-        "before": 50,
-        "after": 53
+      "bartender_pronouns": {
+        "before": "they/them",
+        "after": "she/her"
+      },
+      "bartender_gender": {
+        "before": "unknown",
+        "after": "female"
+      },
+      "world_mood": {
+        "before": "mysterious",
+        "after": "warm"
+      },
+      "location": {
+        "before": "old forest",
+        "after": "tavern"
       }
     },
     "important_state": {
@@ -21,35 +33,54 @@
       "relationship_with_merchant": 50,
       "bartender_health": 100,
       "bartender_hostile": false,
-      "relationship_with_bartender": 53,
-      "bartender_mood": "talkative",
+      "relationship_with_bartender": 50,
+      "bartender_mood": "neutral",
+      "bartender_role": "barmaid",
+      "bartender_gender": "female",
+      "bartender_pronouns": "she/her",
       "tavern_reputation": 50,
       "player_reputation": 50,
       "enemy_health": 60,
-      "location": "old forest",
-      "world_mood": "mysterious"
+      "location": "tavern",
+      "world_mood": "warm"
     }
   },
   {
-    "timestamp": "2026-05-27T17:19:09",
-    "player_input": "I order a glass of the finest drink and request more details ",
-    "intent": "general_action",
-    "target": "unknown",
-    "system_result": "No specific game action was executed.",
-    "state_changes": {},
+    "timestamp": "2026-05-28T19:38:47",
+    "player_input": "I compliment her appearance and ask for a glass of the finest ale",
+    "intent": "tavern_action",
+    "target": "bartender",
+    "system_result": "The bartender serves ale. It costs 3 coins. The player's gold decreases from 50 to 47.",
+    "state_changes": {
+      "gold": {
+        "before": 50,
+        "after": 47
+      },
+      "relationship_with_bartender": {
+        "before": 50,
+        "after": 51
+      },
+      "bartender_mood": {
+        "before": "neutral",
+        "after": "warm"
+      }
+    },
     "important_state": {
       "merchant_health": 100,
       "merchant_hostile": false,
       "relationship_with_merchant": 50,
       "bartender_health": 100,
       "bartender_hostile": false,
-      "relationship_with_bartender": 53,
-      "bartender_mood": "talkative",
+      "relationship_with_bartender": 51,
+      "bartender_mood": "warm",
+      "bartender_role": "barmaid",
+      "bartender_gender": "female",
+      "bartender_pronouns": "she/her",
       "tavern_reputation": 50,
       "player_reputation": 50,
       "enemy_health": 60,
-      "location": "old forest",
-      "world_mood": "mysterious"
+      "location": "tavern",
+      "world_mood": "warm"
     }
   }
 ]

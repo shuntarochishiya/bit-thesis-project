@@ -10,6 +10,7 @@ def main():
     print("Type 'state' to see the current game state.")
     print("Type 'memory' to see recent memory events.")
     print("Type 'clear memory' to erase persistent memory.")
+    print("Type 'context' to see the current interaction context.")
     print("Type 'log' to see the last execution log.\n")
 
     while True:
@@ -29,6 +30,10 @@ def main():
 
         if player_input.lower() in ["clear memory", "reset memory"]:
             game.clear_memory()
+            continue
+
+        if player_input.lower() in ["context", "ctx"]:
+            game.show_context()
             continue
 
         if player_input.lower() in ["log", "last log", "execution log"]:

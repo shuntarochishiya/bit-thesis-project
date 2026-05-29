@@ -15,6 +15,7 @@ class ExecutionLogger:
         log_entry = {
             "player_input": player_input,
             "recognized_intent": None,
+            "target": None,
             "execution_dag": [],
             "executed_tasks": [],
             "fallbacks_used": [],
@@ -28,8 +29,9 @@ class ExecutionLogger:
 
         self.logs.append(log_entry)
 
-    def set_intent(self, intent: str):
+    def set_intent(self, intent: str, target: str):
         self.logs[-1]["recognized_intent"] = intent
+        self.logs[-1]["target"] = target
 
     def set_dag(self, plan: List[Dict[str, Any]]):
         self.logs[-1]["execution_dag"] = [
@@ -95,6 +97,7 @@ class ExecutionLogger:
         print("\n--- Execution Log ---")
         print(f"Player input: {log['player_input']}")
         print(f"Recognized intent: {log['recognized_intent']}")
+        print(f"Target: {log['target']}")
 
         print("\nExecution DAG:")
         for task in log["execution_dag"]:

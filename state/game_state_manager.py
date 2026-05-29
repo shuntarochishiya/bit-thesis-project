@@ -26,6 +26,9 @@ class GameStateManager:
             "relationship_with_bartender": 50,
             "bartender_hostile": False,
             "bartender_mood": "neutral",
+            "bartender_role": "bartender",
+            "bartender_gender": "unknown",
+            "bartender_pronouns": "they/them",
 
             "tavern_reputation": 50,
             "player_reputation": 50,

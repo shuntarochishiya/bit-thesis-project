@@ -74,6 +74,9 @@ class MemorySystem:
                 "bartender_hostile": state_after.get("bartender_hostile"),
                 "relationship_with_bartender": state_after.get("relationship_with_bartender"),
                 "bartender_mood": state_after.get("bartender_mood"),
+                "bartender_role": state_after.get("bartender_role"),
+                "bartender_gender": state_after.get("bartender_gender"),
+                "bartender_pronouns": state_after.get("bartender_pronouns"),
                 "tavern_reputation": state_after.get("tavern_reputation"),
 
                 "player_reputation": state_after.get("player_reputation"),

@@ -77,6 +77,9 @@ Current game state:
 - Relationship with bartender: {game_state["relationship_with_bartender"]}
 - Bartender hostile: {game_state["bartender_hostile"]}
 - Bartender mood: {game_state["bartender_mood"]}
+- Bartender role: {game_state["bartender_role"]}
+- Bartender gender: {game_state["bartender_gender"]}
+- Bartender pronouns: {game_state["bartender_pronouns"]}
 - Tavern reputation: {game_state["tavern_reputation"]}
 
 Recognized player intent:
@@ -106,6 +109,7 @@ Output rules:
 12. If the player interacts with the bartender, reflect the bartender's mood, tavern reputation, and previous player behavior.
 13. If the bartender is hostile, do not describe them as friendly or helpful.
 14. If the player is in the tavern, make the atmosphere feel like an inn or medieval tavern.
+15. Keep NPC identity consistent. If the bartender role is "barmaid", describe this NPC as a woman and use she/her pronouns. If the role is "barman", use he/him pronouns. If the role is "bartender" or "innkeeper", use neutral they/them unless the gender is known.
 """
 
         response = self.llm.invoke([
