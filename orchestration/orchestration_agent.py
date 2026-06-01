@@ -1,4 +1,12 @@
-from config import create_llm, TASK_TEMPLATE_PATH, MEMORY_PATH
+from config import (
+    create_llm,
+    create_embeddings,
+    TASK_TEMPLATE_PATH,
+    MEMORY_PATH,
+    CHROMA_PERSIST_DIR,
+    CHROMA_COLLECTION_NAME
+)
+from memory.semantic_memory import SemanticMemorySystem
 
 from state.game_state_manager import GameStateManager
 from state.context_manager import ContextManager
@@ -12,6 +20,7 @@ from agents.dialogue_agent import DialogueAgent
 from agents.exploration_agent import ExplorationAgent
 from agents.narrative_agent import NarrativeGenerationAgent
 from agents.tavern_agent import TavernAgent
+from agents.consequence_agent import ConsequenceAgent
 
 from engine.task_planner import TaskPlanner
 from engine.execution_engine import ExecutionEngine
@@ -27,10 +36,18 @@ class OrchestrationAgent:
 
     def __init__(self):
         self.llm = create_llm()
+        self.embeddings = create_embeddings()
 
         self.game_state_manager = GameStateManager()
         self.context_manager = ContextManager()
+
         self.memory_system = MemorySystem(memory_path=MEMORY_PATH)
+        self.semantic_memory_system = SemanticMemorySystem(
+            embeddings=self.embeddings,
+            persist_directory=CHROMA_PERSIST_DIR,
+            collection_name=CHROMA_COLLECTION_NAME
+        )
+
         self.execution_logger = ExecutionLogger()
         self.fallback_manager = FallbackManager()
 
@@ -46,12 +63,15 @@ class OrchestrationAgent:
         self.dialogue_agent = DialogueAgent()
         self.tavern_agent = TavernAgent()
 
+        self.consequence_agent = ConsequenceAgent()
         self.narrative_agent = NarrativeGenerationAgent(self.llm)
 
         self.execution_engine = ExecutionEngine(
             game_state_manager=self.game_state_manager,
             memory_system=self.memory_system,
+            semantic_memory_system=self.semantic_memory_system,
             execution_logger=self.execution_logger,
+            consequence_agent=self.consequence_agent,
             fallback_manager=self.fallback_manager,
             combat_agent=self.combat_agent,
             persuasion_agent=self.persuasion_agent,
@@ -139,6 +159,15 @@ class OrchestrationAgent:
 
     def show_memory(self):
         self.memory_system.display_memory()
+
+    def search_semantic_memory(self, query: str):
+        self.semantic_memory_system.display_relevant_events(query=query)
+
+    def rebuild_semantic_memory(self):
+        self.semantic_memory_system.rebuild_from_persistent_memory(
+            self.memory_system.events
+        )
+        print("\nSemantic memory has been rebuilt from persistent memory.\n")
 
     def clear_memory(self):
         self.memory_system.clear_memory()

@@ -20,6 +20,7 @@ class ExecutionLogger:
             "executed_tasks": [],
             "fallbacks_used": [],
             "errors": [],
+            "consequence_decision": None,
             "state_before": state_before,
             "state_after": None,
             "state_changes": {},
@@ -43,6 +44,9 @@ class ExecutionLogger:
             }
             for task in plan
         ]
+
+    def set_consequence_decision(self, consequence_decision: Dict[str, Any]):
+        self.logs[-1]["consequence_decision"] = consequence_decision
 
     def add_executed_task(self, task_id: str, agent_type: str):
         self.logs[-1]["executed_tasks"].append({
@@ -98,6 +102,7 @@ class ExecutionLogger:
         print(f"Player input: {log['player_input']}")
         print(f"Recognized intent: {log['recognized_intent']}")
         print(f"Target: {log['target']}")
+        print(f"Consequence decision: {log.get('consequence_decision')}")
 
         print("\nExecution DAG:")
         for task in log["execution_dag"]:

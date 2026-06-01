@@ -11,6 +11,8 @@ def main():
     print("Type 'memory' to see recent memory events.")
     print("Type 'clear memory' to erase persistent memory.")
     print("Type 'context' to see the current interaction context.")
+    print("Type 'semantic <query>' to search semantic memory.")
+    print("Type 'rebuild semantic' to rebuild vector memory from memory.json.")
     print("Type 'log' to see the last execution log.\n")
 
     while True:
@@ -38,6 +40,15 @@ def main():
 
         if player_input.lower() in ["log", "last log", "execution log"]:
             game.show_last_log()
+            continue
+
+        if player_input.lower().startswith("semantic "):
+            query = player_input[len("semantic "):]
+            game.search_semantic_memory(query)
+            continue
+
+        if player_input.lower() in ["rebuild semantic", "rebuild semantic memory"]:
+            game.rebuild_semantic_memory()
             continue
 
         response = game.process_player_input(player_input)

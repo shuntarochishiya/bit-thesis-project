@@ -2,6 +2,7 @@ from typing import Dict, Any, List
 
 from state.game_state_manager import GameStateManager
 from memory.memory_system import MemorySystem
+from memory.semantic_memory import SemanticMemorySystem
 from engine.execution_logger import ExecutionLogger
 from engine.fallback_manager import FallbackManager
 
@@ -11,6 +12,7 @@ from agents.dialogue_agent import DialogueAgent
 from agents.exploration_agent import ExplorationAgent
 from agents.narrative_agent import NarrativeGenerationAgent
 from agents.tavern_agent import TavernAgent
+from agents.consequence_agent import ConsequenceAgent
 
 
 class ExecutionEngine:
@@ -23,8 +25,10 @@ class ExecutionEngine:
         self,
         game_state_manager: GameStateManager,
         memory_system: MemorySystem,
+        semantic_memory_system: SemanticMemorySystem,
         execution_logger: ExecutionLogger,
         fallback_manager: FallbackManager,
+        consequence_agent: ConsequenceAgent,
         combat_agent: CombatAgent,
         tavern_agent: TavernAgent,
         persuasion_agent: PersuasionAgent,
@@ -34,8 +38,10 @@ class ExecutionEngine:
     ):
         self.game_state_manager = game_state_manager
         self.memory_system = memory_system
+        self.semantic_memory_system = semantic_memory_system
         self.execution_logger = execution_logger
         self.fallback_manager = fallback_manager
+        self.consequence_agent = consequence_agent
         self.tavern_agent = tavern_agent
         self.combat_agent = combat_agent
         self.persuasion_agent = persuasion_agent
@@ -48,6 +54,75 @@ class ExecutionEngine:
         execution_result = "No specific game action was executed."
 
         state_before_turn = self.game_state_manager.get_state()
+
+        consequence_query = (
+            f"Player input: {player_input}. "
+            f"Intent: {intent}. "
+            f"Target: {target}. "
+            f"Current state: {state_before_turn}"
+        )
+
+        relevant_consequence_memory = self.semantic_memory_system.retrieve_relevant_events(
+            query=consequence_query,
+            k=5
+        )
+
+        consequence_result = self.consequence_agent.evaluate(
+            player_input=player_input,
+            intent=intent,
+            target=target,
+            game_state=state_before_turn,
+            relevant_memory=relevant_consequence_memory
+        )
+
+        self.execution_logger.set_consequence_decision(consequence_result)
+
+        if consequence_result["state_updates"]:
+            self.game_state_manager.update_state(consequence_result["state_updates"])
+
+        if not consequence_result["allow_action"]:
+            execution_result = consequence_result["reason"]
+
+            state_after_action = self.game_state_manager.get_state()
+
+            memory_item = self.memory_system.add_event(
+                player_input=player_input,
+                intent=intent,
+                target=target,
+                system_result=execution_result,
+                state_before=state_before_turn,
+                state_after=state_after_action
+            )
+
+            self.semantic_memory_system.add_event(memory_item)
+
+            final_state = self.game_state_manager.get_state()
+
+            recent_memory = self.memory_system.retrieve_recent_events()
+
+            combined_memory = recent_memory + relevant_consequence_memory + [
+                f"Consequence decision: {consequence_result}"
+            ]
+
+            narrative = self.narrative_agent.generate(
+                player_input=player_input,
+                intent=intent,
+                target=target,
+                game_state=final_state,
+                execution_result=execution_result,
+                memory_events=combined_memory
+            )
+
+            self.execution_logger.set_memory_event(
+                f"Action blocked by ConsequenceAgent. Reason: {execution_result}"
+            )
+
+            self.execution_logger.finish_turn(
+                state_after=final_state,
+                final_response=narrative
+            )
+
+            return narrative
 
         for task in plan:
             task_id = task["task_id"]
@@ -103,7 +178,7 @@ class ExecutionEngine:
                 elif agent_type == "memory":
                     state_after_action = self.game_state_manager.get_state()
 
-                    self.memory_system.add_event(
+                    memory_item = self.memory_system.add_event(
                         player_input=player_input,
                         intent=intent,
                         target=target,
@@ -111,6 +186,8 @@ class ExecutionEngine:
                         state_before=state_before_turn,
                         state_after=state_after_action
                     )
+
+                    self.semantic_memory_system.add_event(memory_item)
 
                     memory_event_for_log = (
                         f"Player input: {player_input}. "
@@ -124,7 +201,24 @@ class ExecutionEngine:
 
                 elif agent_type == "narrative":
                     final_state = self.game_state_manager.get_state()
+
                     recent_memory = self.memory_system.retrieve_recent_events()
+
+                    semantic_query = (
+                        f"Player input: {player_input}. "
+                        f"Intent: {intent}. "
+                        f"Target: {target}. "
+                        f"Current game state: {final_state}"
+                    )
+
+                    relevant_semantic_memory = self.semantic_memory_system.retrieve_relevant_events(
+                        query=semantic_query,
+                        k=3
+                    )
+
+                    combined_memory = recent_memory + relevant_semantic_memory + [
+                        f"Consequence decision: {consequence_result}"
+                    ]
 
                     narrative = self.narrative_agent.generate(
                         player_input=player_input,
@@ -132,7 +226,7 @@ class ExecutionEngine:
                         target=target,
                         game_state=final_state,
                         execution_result=execution_result,
-                        memory_events=recent_memory
+                        memory_events=combined_memory
                     )
 
                     self.execution_logger.finish_turn(
@@ -183,4 +277,3 @@ class ExecutionEngine:
         )
 
         return execution_result
-

@@ -89,6 +89,8 @@ class MemorySystem:
         self.events.append(memory_item)
         self.save_memory()
 
+        return memory_item
+
     def calculate_state_changes(
         self,
         state_before: Dict[str, Any],
