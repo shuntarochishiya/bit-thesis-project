@@ -5,6 +5,7 @@ from memory.memory_system import MemorySystem
 from memory.semantic_memory import SemanticMemorySystem
 from engine.execution_logger import ExecutionLogger
 from engine.fallback_manager import FallbackManager
+from engine.dag_scheduler import DAGScheduler
 
 from agents.combat_agent import CombatAgent
 from agents.persuasion_agent import PersuasionAgent
@@ -17,8 +18,11 @@ from agents.consequence_agent import ConsequenceAgent
 
 class ExecutionEngine:
     """
-    Simplified dynamic execution engine.
-    It executes tasks according to the plan created by TaskPlanner.
+    Dynamic execution engine.
+
+    It executes tasks according to the DAG created from task_templates.json.
+    Semantic memory retrieval and consequence evaluation are now executed
+    as normal DAG nodes.
     """
 
     def __init__(
@@ -37,237 +41,373 @@ class ExecutionEngine:
         narrative_agent: NarrativeGenerationAgent
     ):
         self.game_state_manager = game_state_manager
+        self.dag_scheduler = DAGScheduler()
         self.memory_system = memory_system
         self.semantic_memory_system = semantic_memory_system
         self.execution_logger = execution_logger
         self.fallback_manager = fallback_manager
         self.consequence_agent = consequence_agent
+
         self.tavern_agent = tavern_agent
         self.combat_agent = combat_agent
         self.persuasion_agent = persuasion_agent
         self.exploration_agent = exploration_agent
-        self.narrative_agent = narrative_agent
         self.dialogue_agent = dialogue_agent
+        self.narrative_agent = narrative_agent
 
-    def execute_plan(self, plan: List[Dict[str, Any]], player_input: str, intent: str, target: str) -> str:
+    def apply_state_updates(
+        self,
+        updates: Dict[str, Any],
+        source: str,
+        reason: str,
+        snapshot_id: int
+    ):
+        """
+        Applies state updates and rolls back if the state becomes invalid.
+        """
+
+        if not updates:
+            return
+
+        self.game_state_manager.update_state(
+            updates,
+            source=source,
+            reason=reason
+        )
+
+        if not self.game_state_manager.validate_state():
+            self.game_state_manager.rollback_to_snapshot(snapshot_id)
+            raise Exception(
+                f"Invalid game state detected after update from {source}. "
+                f"Rolled back to snapshot {snapshot_id}."
+            )
+
+    def build_blocked_action_result(self, execution_context: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Creates a standard result when ConsequenceAgent blocks an action.
+        """
+
+        consequence_result = execution_context["consequence_result"]
+
+        return {
+            "success": False,
+            "message": consequence_result.get(
+                "reason",
+                "The action was blocked by previous consequences."
+            ),
+            "state_updates": {}
+        }
+
+    def execute_plan(
+        self,
+        plan: List[Dict[str, Any]],
+        player_input: str,
+        intent: str,
+        target: str
+    ) -> str:
         completed_tasks = {}
         execution_result = "No specific game action was executed."
 
+        execution_levels = self.dag_scheduler.build_execution_levels(plan)
+        formatted_execution_levels = self.dag_scheduler.format_execution_levels(execution_levels)
+        self.execution_logger.set_dag_execution_levels(formatted_execution_levels)
+
+        snapshot_id = self.game_state_manager.create_snapshot(
+            label=f"Before action | intent={intent} | target={target} | input={player_input}"
+        )
+
         state_before_turn = self.game_state_manager.get_state()
 
-        consequence_query = (
-            f"Player input: {player_input}. "
-            f"Intent: {intent}. "
-            f"Target: {target}. "
-            f"Current state: {state_before_turn}"
-        )
+        execution_context: Dict[str, Any] = {
+            "semantic_memory_results": [],
+            "consequence_result": {
+                "allow_action": True,
+                "reason": "No consequence evaluation has been performed yet.",
+                "reaction_modifier": "neutral",
+                "state_updates": {},
+                "system_note": ""
+            },
+            "action_blocked": False
+        }
 
-        relevant_consequence_memory = self.semantic_memory_system.retrieve_relevant_events(
-            query=consequence_query,
-            k=5
-        )
+        for level in execution_levels:
+            for task in level:
+                task_id = task["task_id"]
+                agent_type = task["agent"]
+                fallback_name = task.get("fallback", "generic_fallback")
 
-        consequence_result = self.consequence_agent.evaluate(
-            player_input=player_input,
-            intent=intent,
-            target=target,
-            game_state=state_before_turn,
-            relevant_memory=relevant_consequence_memory
-        )
+                self.execution_logger.add_executed_task(task_id, agent_type)
 
-        self.execution_logger.set_consequence_decision(consequence_result)
+                try:
+                    dependencies = task.get("depends_on", [])
 
-        if consequence_result["state_updates"]:
-            self.game_state_manager.update_state(consequence_result["state_updates"])
+                    for dependency in dependencies:
+                        if dependency not in completed_tasks:
+                            raise Exception(
+                                f"Task {task_id} depends on {dependency}, "
+                                f"but it was not completed."
+                            )
 
-        if not consequence_result["allow_action"]:
-            execution_result = consequence_result["reason"]
+                    game_state = self.game_state_manager.get_state()
 
-            state_after_action = self.game_state_manager.get_state()
+                    if agent_type == "validation":
+                        completed_tasks[task_id] = {
+                            "success": True,
+                            "message": "Validation completed.",
+                            "state_updates": {}
+                        }
 
-            memory_item = self.memory_system.add_event(
-                player_input=player_input,
-                intent=intent,
-                target=target,
-                system_result=execution_result,
-                state_before=state_before_turn,
-                state_after=state_after_action
-            )
+                    elif agent_type == "semantic_memory":
+                        current_state = self.game_state_manager.get_state()
 
-            self.semantic_memory_system.add_event(memory_item)
-
-            final_state = self.game_state_manager.get_state()
-
-            recent_memory = self.memory_system.retrieve_recent_events()
-
-            combined_memory = recent_memory + relevant_consequence_memory + [
-                f"Consequence decision: {consequence_result}"
-            ]
-
-            narrative = self.narrative_agent.generate(
-                player_input=player_input,
-                intent=intent,
-                target=target,
-                game_state=final_state,
-                execution_result=execution_result,
-                memory_events=combined_memory
-            )
-
-            self.execution_logger.set_memory_event(
-                f"Action blocked by ConsequenceAgent. Reason: {execution_result}"
-            )
-
-            self.execution_logger.finish_turn(
-                state_after=final_state,
-                final_response=narrative
-            )
-
-            return narrative
-
-        for task in plan:
-            task_id = task["task_id"]
-            agent_type = task["agent"]
-            fallback_name = task.get("fallback", "generic_fallback")
-
-            self.execution_logger.add_executed_task(task_id, agent_type)
-
-            try:
-                # Check dependencies
-                dependencies = task["depends_on"]
-                for dependency in dependencies:
-                    if dependency not in completed_tasks:
-                        raise Exception(
-                            f"Task {task_id} depends on {dependency}, but it was not completed."
+                        semantic_query = (
+                            f"Player input: {player_input}. "
+                            f"Intent: {intent}. "
+                            f"Target: {target}. "
+                            f"Current game state: {current_state}"
                         )
 
-                game_state = self.game_state_manager.get_state()
+                        semantic_memory_results = self.semantic_memory_system.retrieve_relevant_events(
+                            query=semantic_query,
+                            k=5
+                        )
 
-                if agent_type == "validation":
-                    completed_tasks[task_id] = "Validation completed."
+                        execution_context["semantic_memory_results"] = semantic_memory_results
+                        self.execution_logger.set_semantic_memory_results(semantic_memory_results)
 
-                elif agent_type == "combat":
-                    result = self.combat_agent.execute(game_state, target=target)
-                    self.game_state_manager.update_state(result["state_updates"])
-                    execution_result = result["message"]
-                    completed_tasks[task_id] = result
+                        execution_result = "Semantic memory retrieval completed."
 
-                elif agent_type == "persuasion":
-                    result = self.persuasion_agent.execute(game_state)
-                    self.game_state_manager.update_state(result["state_updates"])
-                    execution_result = result["message"]
-                    completed_tasks[task_id] = result
+                        completed_tasks[task_id] = {
+                            "success": True,
+                            "message": execution_result,
+                            "state_updates": {}
+                        }
 
-                elif agent_type == "dialogue":
-                    result = self.dialogue_agent.execute(game_state, target=target)
-                    self.game_state_manager.update_state(result["state_updates"])
-                    execution_result = result["message"]
-                    completed_tasks[task_id] = result
+                    elif agent_type == "consequence":
+                        current_state = self.game_state_manager.get_state()
 
-                elif agent_type == "exploration":
-                    result = self.exploration_agent.execute(game_state, player_input=player_input)
-                    self.game_state_manager.update_state(result["state_updates"])
-                    execution_result = result["message"]
-                    completed_tasks[task_id] = result
+                        consequence_result = self.consequence_agent.evaluate(
+                            player_input=player_input,
+                            intent=intent,
+                            target=target,
+                            game_state=current_state,
+                            relevant_memory=execution_context["semantic_memory_results"]
+                        )
 
-                elif agent_type == "tavern":
-                    result = self.tavern_agent.execute(game_state, player_input=player_input)
-                    self.game_state_manager.update_state(result["state_updates"])
-                    execution_result = result["message"]
-                    completed_tasks[task_id] = result
+                        execution_context["consequence_result"] = consequence_result
+                        self.execution_logger.set_consequence_decision(consequence_result)
 
-                elif agent_type == "memory":
-                    state_after_action = self.game_state_manager.get_state()
+                        if consequence_result.get("state_updates"):
+                            self.apply_state_updates(
+                                updates=consequence_result["state_updates"],
+                                source="ConsequenceAgent",
+                                reason=consequence_result.get(
+                                    "reason",
+                                    "Consequence-based state update"
+                                ),
+                                snapshot_id=snapshot_id
+                            )
 
-                    memory_item = self.memory_system.add_event(
-                        player_input=player_input,
-                        intent=intent,
-                        target=target,
-                        system_result=execution_result,
-                        state_before=state_before_turn,
-                        state_after=state_after_action
+                        if not consequence_result.get("allow_action", True):
+                            execution_context["action_blocked"] = True
+                            execution_result = consequence_result.get(
+                                "reason",
+                                "The action was blocked by ConsequenceAgent."
+                            )
+                        else:
+                            execution_result = consequence_result.get(
+                                "system_note",
+                                "Consequence evaluation completed."
+                            )
+
+                        completed_tasks[task_id] = {
+                            "success": consequence_result.get("allow_action", True),
+                            "message": execution_result,
+                            "state_updates": consequence_result.get("state_updates", {})
+                        }
+
+                    elif agent_type == "combat":
+                        if execution_context["action_blocked"]:
+                            result = self.build_blocked_action_result(execution_context)
+                        else:
+                            result = self.combat_agent.execute(game_state, target=target)
+
+                        self.apply_state_updates(
+                            updates=result["state_updates"],
+                            source="CombatAgent",
+                            reason=result["message"],
+                            snapshot_id=snapshot_id
+                        )
+
+                        execution_result = result["message"]
+                        completed_tasks[task_id] = result
+
+                    elif agent_type == "persuasion":
+                        if execution_context["action_blocked"]:
+                            result = self.build_blocked_action_result(execution_context)
+                        else:
+                            result = self.persuasion_agent.execute(game_state)
+
+                        self.apply_state_updates(
+                            updates=result["state_updates"],
+                            source="PersuasionAgent",
+                            reason=result["message"],
+                            snapshot_id=snapshot_id
+                        )
+
+                        execution_result = result["message"]
+                        completed_tasks[task_id] = result
+
+                    elif agent_type == "dialogue":
+                        if execution_context["action_blocked"]:
+                            result = self.build_blocked_action_result(execution_context)
+                        else:
+                            result = self.dialogue_agent.execute(game_state, target=target)
+
+                        self.apply_state_updates(
+                            updates=result["state_updates"],
+                            source="DialogueAgent",
+                            reason=result["message"],
+                            snapshot_id=snapshot_id
+                        )
+
+                        execution_result = result["message"]
+                        completed_tasks[task_id] = result
+
+                    elif agent_type == "exploration":
+                        if execution_context["action_blocked"]:
+                            result = self.build_blocked_action_result(execution_context)
+                        else:
+                            result = self.exploration_agent.execute(
+                                game_state,
+                                player_input=player_input
+                            )
+
+                        self.apply_state_updates(
+                            updates=result["state_updates"],
+                            source="ExplorationAgent",
+                            reason=result["message"],
+                            snapshot_id=snapshot_id
+                        )
+
+                        execution_result = result["message"]
+                        completed_tasks[task_id] = result
+
+                    elif agent_type == "tavern":
+                        if execution_context["action_blocked"]:
+                            result = self.build_blocked_action_result(execution_context)
+                        else:
+                            result = self.tavern_agent.execute(
+                                game_state,
+                                player_input=player_input
+                            )
+
+                        self.apply_state_updates(
+                            updates=result["state_updates"],
+                            source="TavernAgent",
+                            reason=result["message"],
+                            snapshot_id=snapshot_id
+                        )
+
+                        execution_result = result["message"]
+                        completed_tasks[task_id] = result
+
+                    elif agent_type == "memory":
+                        state_after_action = self.game_state_manager.get_state()
+
+                        memory_item = self.memory_system.add_event(
+                            player_input=player_input,
+                            intent=intent,
+                            target=target,
+                            system_result=execution_result,
+                            state_before=state_before_turn,
+                            state_after=state_after_action
+                        )
+
+                        self.semantic_memory_system.add_event(memory_item)
+
+                        memory_event_for_log = (
+                            f"Player input: {player_input}. "
+                            f"Intent: {intent}. "
+                            f"Target: {target}. "
+                            f"System result: {execution_result}"
+                        )
+
+                        self.execution_logger.set_memory_event(memory_event_for_log)
+
+                        completed_tasks[task_id] = {
+                            "success": True,
+                            "message": "Memory and semantic memory updated.",
+                            "state_updates": {}
+                        }
+
+                    elif agent_type == "narrative":
+                        final_state = self.game_state_manager.get_state()
+                        recent_memory = self.memory_system.retrieve_recent_events()
+
+                        combined_memory = (
+                            recent_memory
+                            + execution_context["semantic_memory_results"]
+                            + [
+                                f"Consequence decision: "
+                                f"{execution_context['consequence_result']}"
+                            ]
+                        )
+
+                        narrative = self.narrative_agent.generate(
+                            player_input=player_input,
+                            intent=intent,
+                            target=target,
+                            game_state=final_state,
+                            execution_result=execution_result,
+                            memory_events=combined_memory
+                        )
+
+                        self.execution_logger.finish_turn(
+                            state_after=final_state,
+                            final_response=narrative
+                        )
+
+                        completed_tasks[task_id] = narrative
+
+                        return narrative
+
+                    else:
+                        raise Exception(f"Unknown agent type: {agent_type}")
+
+                except Exception as error:
+                    error_message = str(error)
+
+                    self.execution_logger.add_error(task_id, error_message)
+                    self.execution_logger.add_fallback(task_id, fallback_name)
+
+                    fallback_result = self.fallback_manager.handle_fallback(
+                        fallback_name=fallback_name,
+                        task_id=task_id,
+                        agent_type=agent_type,
+                        game_state=self.game_state_manager.get_state(),
+                        error_message=error_message
                     )
 
-                    self.semantic_memory_system.add_event(memory_item)
-
-                    memory_event_for_log = (
-                        f"Player input: {player_input}. "
-                        f"Intent: {intent}. "
-                        f"Target: {target}. "
-                        f"System result: {execution_result}"
+                    self.apply_state_updates(
+                        updates=fallback_result["state_updates"],
+                        source="FallbackManager",
+                        reason=fallback_result["message"],
+                        snapshot_id=snapshot_id
                     )
 
-                    self.execution_logger.set_memory_event(memory_event_for_log)
-                    completed_tasks[task_id] = "Memory updated."
+                    execution_result = fallback_result["message"]
+                    completed_tasks[task_id] = fallback_result
 
-                elif agent_type == "narrative":
-                    final_state = self.game_state_manager.get_state()
+                    if agent_type == "narrative":
+                        final_state = self.game_state_manager.get_state()
 
-                    recent_memory = self.memory_system.retrieve_recent_events()
+                        self.execution_logger.finish_turn(
+                            state_after=final_state,
+                            final_response=execution_result
+                        )
 
-                    semantic_query = (
-                        f"Player input: {player_input}. "
-                        f"Intent: {intent}. "
-                        f"Target: {target}. "
-                        f"Current game state: {final_state}"
-                    )
-
-                    relevant_semantic_memory = self.semantic_memory_system.retrieve_relevant_events(
-                        query=semantic_query,
-                        k=3
-                    )
-
-                    combined_memory = recent_memory + relevant_semantic_memory + [
-                        f"Consequence decision: {consequence_result}"
-                    ]
-
-                    narrative = self.narrative_agent.generate(
-                        player_input=player_input,
-                        intent=intent,
-                        target=target,
-                        game_state=final_state,
-                        execution_result=execution_result,
-                        memory_events=combined_memory
-                    )
-
-                    self.execution_logger.finish_turn(
-                        state_after=final_state,
-                        final_response=narrative
-                    )
-
-                    completed_tasks[task_id] = narrative
-                    return narrative
-
-                else:
-                    raise Exception(f"Unknown agent type: {agent_type}")
-
-            except Exception as error:
-                error_message = str(error)
-
-                self.execution_logger.add_error(task_id, error_message)
-                self.execution_logger.add_fallback(task_id, fallback_name)
-
-                fallback_result = self.fallback_manager.handle_fallback(
-                    fallback_name=fallback_name,
-                    task_id=task_id,
-                    agent_type=agent_type,
-                    game_state=self.game_state_manager.get_state(),
-                    error_message=error_message
-                )
-
-                self.game_state_manager.update_state(fallback_result["state_updates"])
-                execution_result = fallback_result["message"]
-                completed_tasks[task_id] = fallback_result
-
-                # If narrative generation fails, return a basic fallback response immediately
-                if agent_type == "narrative":
-                    final_state = self.game_state_manager.get_state()
-
-                    self.execution_logger.finish_turn(
-                        state_after=final_state,
-                        final_response=execution_result
-                    )
-
-                    return execution_result
+                        return execution_result
 
         final_state = self.game_state_manager.get_state()
 

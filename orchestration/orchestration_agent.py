@@ -154,6 +154,12 @@ class OrchestrationAgent:
     def show_state(self):
         self.game_state_manager.display_state()
 
+    def show_audit_log(self):
+        self.game_state_manager.display_audit_log()
+
+    def show_snapshots(self):
+        self.game_state_manager.display_snapshots()
+
     def show_context(self):
         self.context_manager.display_context()
 
@@ -171,6 +177,7 @@ class OrchestrationAgent:
 
     def clear_memory(self):
         self.memory_system.clear_memory()
+        self.semantic_memory_system.clear_memory()
 
     def show_last_log(self):
         self.execution_logger.display_last_log()

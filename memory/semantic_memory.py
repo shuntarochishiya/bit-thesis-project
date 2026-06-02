@@ -1,5 +1,7 @@
 import json
 import uuid
+import shutil
+import os
 from typing import Dict, Any, List, Optional
 
 from langchain_core.documents import Document
@@ -247,4 +249,28 @@ class SemanticMemorySystem:
                 print(f"\nResult {index}:")
                 print(result)
 
+    def clear_memory(self):
+        """
+        Clears the local Chroma vector memory.
+        This removes old semantic memory records.
+        """
+
+        try:
+            self.vector_store.delete_collection()
+        except Exception:
+            pass
+
+        try:
+            if os.path.exists(self.persist_directory):
+                shutil.rmtree(self.persist_directory, ignore_errors=True)
+        except Exception:
+            pass
+
+        self.vector_store = Chroma(
+            collection_name=self.collection_name,
+            embedding_function=self.embeddings,
+            persist_directory=self.persist_directory
+        )
+
+        print("\nSemantic memory has been cleared.\n")
         print("------------------------------\n")

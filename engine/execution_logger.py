@@ -19,7 +19,9 @@ class ExecutionLogger:
             "execution_dag": [],
             "executed_tasks": [],
             "fallbacks_used": [],
+            "dag_execution_levels": [],
             "errors": [],
+            "semantic_memory_results": [],
             "consequence_decision": None,
             "state_before": state_before,
             "state_after": None,
@@ -45,6 +47,9 @@ class ExecutionLogger:
             for task in plan
         ]
 
+    def set_dag_execution_levels(self, execution_levels: List[Dict[str, Any]]):
+        self.logs[-1]["dag_execution_levels"] = execution_levels
+
     def set_consequence_decision(self, consequence_decision: Dict[str, Any]):
         self.logs[-1]["consequence_decision"] = consequence_decision
 
@@ -56,6 +61,9 @@ class ExecutionLogger:
 
     def set_memory_event(self, memory_event: str):
         self.logs[-1]["memory_event"] = memory_event
+
+    def set_semantic_memory_results(self, semantic_memory_results: List[str]):
+        self.logs[-1]["semantic_memory_results"] = semantic_memory_results
 
     def finish_turn(self, state_after: Dict[str, Any], final_response: str):
         self.logs[-1]["state_after"] = state_after
@@ -111,9 +119,28 @@ class ExecutionLogger:
                 f"depends on: {task['depends_on']} | fallback: {task['fallback']}"
             )
 
+        print("\nDAG Execution Levels:")
+        if log.get("dag_execution_levels"):
+            for level in log["dag_execution_levels"]:
+                print(f"Level {level['level']}:")
+                for task in level["tasks"]:
+                    print(
+                        f"  - {task['task_id']} | agent: {task['agent']} | "
+                        f"depends on: {task['depends_on']}"
+                    )
+        else:
+            print("- No DAG execution levels recorded")
+
         print("\nExecuted tasks:")
         for task in log["executed_tasks"]:
             print(f"- {task['task_id']} by {task['agent']}")
+
+        print("\nSemantic memory results:")
+        if log.get("semantic_memory_results"):
+            for index, memory in enumerate(log["semantic_memory_results"], start=1):
+                print(f"{index}. {memory}")
+        else:
+            print("- No semantic memory results recorded")
 
         print("\nErrors:")
         if log["errors"]:

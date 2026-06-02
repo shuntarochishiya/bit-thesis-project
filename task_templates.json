@@ -1,5 +1,5 @@
 {
-  "combat_action": [
+    "combat_action": [
     {
       "task_id": "validate_action",
       "depends_on": [],
@@ -7,8 +7,20 @@
       "fallback": "cancel_action"
     },
     {
+      "task_id": "retrieve_semantic_memory",
+      "depends_on": [],
+      "agent": "semantic_memory",
+      "fallback": "skip_semantic_memory"
+    },
+    {
+      "task_id": "evaluate_consequences",
+      "depends_on": ["validate_action", "retrieve_semantic_memory"],
+      "agent": "consequence",
+      "fallback": "skip_consequence_check"
+    },
+    {
       "task_id": "execute_combat",
-      "depends_on": ["validate_action"],
+      "depends_on": ["evaluate_consequences"],
       "agent": "combat",
       "fallback": "safe_combat_response"
     },
@@ -26,7 +38,7 @@
     }
   ],
 
-  "persuasion_action": [
+    "persuasion_action": [
     {
       "task_id": "validate_action",
       "depends_on": [],
@@ -34,9 +46,21 @@
       "fallback": "cancel_action"
     },
     {
+      "task_id": "retrieve_semantic_memory",
+      "depends_on": [],
+      "agent": "semantic_memory",
+      "fallback": "skip_semantic_memory"
+    },
+    {
+      "task_id": "evaluate_consequences",
+      "depends_on": ["validate_action", "retrieve_semantic_memory"],
+      "agent": "consequence",
+      "fallback": "skip_consequence_check"
+    },
+    {
       "task_id": "execute_persuasion",
-      "depends_on": ["validate_action"],
-      "agent": "кpersuasion",
+      "depends_on": ["evaluate_consequences"],
+      "agent": "persuasion",
       "fallback": "safe_persuasion_response"
     },
     {
@@ -53,10 +77,16 @@
     }
   ],
 
-  "exploration_action": [
+    "exploration_action": [
+    {
+      "task_id": "retrieve_semantic_memory",
+      "depends_on": [],
+      "agent": "semantic_memory",
+      "fallback": "skip_semantic_memory"
+    },
     {
       "task_id": "execute_exploration",
-      "depends_on": [],
+      "depends_on": ["retrieve_semantic_memory"],
       "agent": "exploration",
       "fallback": "safe_exploration_response"
     },
@@ -74,31 +104,55 @@
     }
   ],
 
-  "dialogue_action": [
-  {
-    "task_id": "execute_dialogue",
-    "depends_on": [],
-    "agent": "dialogue",
-    "fallback": "safe_dialogue_response"
-  },
-  {
-    "task_id": "update_memory",
-    "depends_on": ["execute_dialogue"],
-    "agent": "memory",
-    "fallback": "skip_memory_update"
-  },
-  {
-    "task_id": "generate_narrative",
-    "depends_on": ["execute_dialogue", "update_memory"],
-    "agent": "narrative",
-    "fallback": "basic_narrative"
-  }
-],
+    "dialogue_action": [
+    {
+      "task_id": "retrieve_semantic_memory",
+      "depends_on": [],
+      "agent": "semantic_memory",
+      "fallback": "skip_semantic_memory"
+    },
+    {
+      "task_id": "evaluate_consequences",
+      "depends_on": ["retrieve_semantic_memory"],
+      "agent": "consequence",
+      "fallback": "skip_consequence_check"
+    },
+    {
+      "task_id": "execute_dialogue",
+      "depends_on": ["evaluate_consequences"],
+      "agent": "dialogue",
+      "fallback": "safe_dialogue_response"
+    },
+    {
+      "task_id": "update_memory",
+      "depends_on": ["execute_dialogue"],
+      "agent": "memory",
+      "fallback": "skip_memory_update"
+    },
+    {
+      "task_id": "generate_narrative",
+      "depends_on": ["execute_dialogue", "update_memory"],
+      "agent": "narrative",
+      "fallback": "basic_narrative"
+    }
+  ],
 
-  "tavern_action": [
+    "tavern_action": [
+    {
+      "task_id": "retrieve_semantic_memory",
+      "depends_on": [],
+      "agent": "semantic_memory",
+      "fallback": "skip_semantic_memory"
+    },
+    {
+      "task_id": "evaluate_consequences",
+      "depends_on": ["retrieve_semantic_memory"],
+      "agent": "consequence",
+      "fallback": "skip_consequence_check"
+    },
     {
       "task_id": "execute_tavern_action",
-      "depends_on": [],
+      "depends_on": ["evaluate_consequences"],
       "agent": "tavern",
       "fallback": "safe_tavern_response"
     },
@@ -118,8 +172,14 @@
 
   "general_action": [
     {
-      "task_id": "update_memory",
+      "task_id": "retrieve_semantic_memory",
       "depends_on": [],
+      "agent": "semantic_memory",
+      "fallback": "skip_semantic_memory"
+    },
+    {
+      "task_id": "update_memory",
+      "depends_on": ["retrieve_semantic_memory"],
       "agent": "memory",
       "fallback": "skip_memory_update"
     },

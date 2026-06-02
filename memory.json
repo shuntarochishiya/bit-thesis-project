@@ -1,14 +1,14 @@
 [
   {
-    "timestamp": "2026-05-29T19:04:50",
-    "player_input": "I enter the bar and greet a barmaid with a flirty wink",
+    "timestamp": "2026-06-02T16:26:10",
+    "player_input": "I enter the tavern and greet a barmaid",
     "intent": "tavern_action",
     "target": "bartender",
     "system_result": "The tavern is noisy, warm, and full of tired travelers. The bartender waits behind the counter.",
     "state_changes": {
-      "world_mood": {
-        "before": "mysterious",
-        "after": "warm"
+      "bartender_pronouns": {
+        "before": "they/them",
+        "after": "she/her"
       },
       "bartender_gender": {
         "before": "unknown",
@@ -22,9 +22,9 @@
         "before": "old forest",
         "after": "tavern"
       },
-      "bartender_pronouns": {
-        "before": "they/them",
-        "after": "she/her"
+      "world_mood": {
+        "before": "mysterious",
+        "after": "warm"
       }
     },
     "important_state": {
@@ -46,49 +46,11 @@
     }
   },
   {
-    "timestamp": "2026-05-29T19:06:52",
-    "player_input": "I ask her for the glass of a good drink as usual",
-    "intent": "tavern_action",
+    "timestamp": "2026-06-02T16:28:18",
+    "player_input": "I ask the barmaid about any errands I could run for her",
+    "intent": "dialogue_action",
     "target": "bartender",
-    "system_result": "The bartender serves ale. It costs 2 coins. The player's gold decreases from 50 to 48.",
-    "state_changes": {
-      "relationship_with_bartender": {
-        "before": 50,
-        "after": 51
-      },
-      "bartender_mood": {
-        "before": "neutral",
-        "after": "warm"
-      },
-      "gold": {
-        "before": 50,
-        "after": 48
-      }
-    },
-    "important_state": {
-      "merchant_health": 100,
-      "merchant_hostile": false,
-      "relationship_with_merchant": 50,
-      "bartender_health": 100,
-      "bartender_hostile": false,
-      "relationship_with_bartender": 51,
-      "bartender_mood": "warm",
-      "bartender_role": "barmaid",
-      "bartender_gender": "female",
-      "bartender_pronouns": "she/her",
-      "tavern_reputation": 50,
-      "player_reputation": 50,
-      "enemy_health": 60,
-      "location": "tavern",
-      "world_mood": "warm"
-    }
-  },
-  {
-    "timestamp": "2026-05-29T19:11:04",
-    "player_input": "I assault barmaid",
-    "intent": "general_action",
-    "target": "bartender",
-    "system_result": "No specific game action was executed.",
+    "system_result": "The bartender wipes a wooden mug and waits to hear what the player wants.",
     "state_changes": {},
     "important_state": {
       "merchant_health": 100,
@@ -96,8 +58,8 @@
       "relationship_with_merchant": 50,
       "bartender_health": 100,
       "bartender_hostile": false,
-      "relationship_with_bartender": 51,
-      "bartender_mood": "warm",
+      "relationship_with_bartender": 50,
+      "bartender_mood": "neutral",
       "bartender_role": "barmaid",
       "bartender_gender": "female",
       "bartender_pronouns": "she/her",
@@ -109,15 +71,19 @@
     }
   },
   {
-    "timestamp": "2026-05-29T19:12:49",
-    "player_input": "I attack the maid",
-    "intent": "combat_action",
-    "target": "enemy",
-    "system_result": "The player hits the enemy and deals 8 damage.",
+    "timestamp": "2026-06-02T16:29:58",
+    "player_input": "I ask if anything strange had been spotted nearby recently",
+    "intent": "tavern_action",
+    "target": "bartender",
+    "system_result": "The tavern keeper says a wounded traveler came in last night, claiming goblins were gathering near the forest road.",
     "state_changes": {
-      "enemy_health": {
-        "before": 60,
-        "after": 52
+      "bartender_mood": {
+        "before": "neutral",
+        "after": "talkative"
+      },
+      "relationship_with_bartender": {
+        "before": 50,
+        "after": 53
       }
     },
     "important_state": {
@@ -126,48 +92,39 @@
       "relationship_with_merchant": 50,
       "bartender_health": 100,
       "bartender_hostile": false,
-      "relationship_with_bartender": 51,
-      "bartender_mood": "warm",
+      "relationship_with_bartender": 53,
+      "bartender_mood": "talkative",
       "bartender_role": "barmaid",
       "bartender_gender": "female",
       "bartender_pronouns": "she/her",
       "tavern_reputation": 50,
       "player_reputation": 50,
-      "enemy_health": 52,
+      "enemy_health": 60,
       "location": "tavern",
       "world_mood": "warm"
     }
   },
   {
-    "timestamp": "2026-05-29T19:14:41",
-    "player_input": "I ask barmaid for a free room ",
+    "timestamp": "2026-06-02T16:32:25",
+    "player_input": "I ask her about the possibility of getting a free rom if I deal with goblins",
     "intent": "tavern_action",
     "target": "bartender",
-    "system_result": "The player rents a small room for 10 coins and takes time to recover.",
-    "state_changes": {
-      "relationship_with_bartender": {
-        "before": 51,
-        "after": 54
-      },
-      "gold": {
-        "before": 48,
-        "after": 38
-      }
-    },
+    "system_result": "The tavern is noisy, warm, and full of tired travelers. The bartender waits behind the counter.",
+    "state_changes": {},
     "important_state": {
       "merchant_health": 100,
       "merchant_hostile": false,
       "relationship_with_merchant": 50,
       "bartender_health": 100,
       "bartender_hostile": false,
-      "relationship_with_bartender": 54,
-      "bartender_mood": "warm",
+      "relationship_with_bartender": 53,
+      "bartender_mood": "talkative",
       "bartender_role": "barmaid",
       "bartender_gender": "female",
       "bartender_pronouns": "she/her",
       "tavern_reputation": 50,
       "player_reputation": 50,
-      "enemy_health": 52,
+      "enemy_health": 60,
       "location": "tavern",
       "world_mood": "warm"
     }

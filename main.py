@@ -8,6 +8,8 @@ def main():
     print("Local LLM: Ollama")
     print("Type 'exit' to quit.")
     print("Type 'state' to see the current game state.")
+    print("Type 'audit' to see the state audit log.")
+    print("Type 'snapshots' to see state snapshots.")
     print("Type 'memory' to see recent memory events.")
     print("Type 'clear memory' to erase persistent memory.")
     print("Type 'context' to see the current interaction context.")
@@ -40,6 +42,14 @@ def main():
 
         if player_input.lower() in ["log", "last log", "execution log"]:
             game.show_last_log()
+            continue
+
+        if player_input.lower() in ["audit", "audit log", "state audit"]:
+            game.show_audit_log()
+            continue
+
+        if player_input.lower() in ["snapshots", "show snapshots"]:
+            game.show_snapshots()
             continue
 
         if player_input.lower().startswith("semantic "):

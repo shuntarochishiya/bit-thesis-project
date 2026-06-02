@@ -51,6 +51,20 @@ class FallbackManager:
                 "state_updates": {}
             }
 
+        if fallback_name == "skip_semantic_memory":
+            return {
+                "success": True,
+                "message": "Semantic memory retrieval was skipped due to an internal issue.",
+                "state_updates": {}
+            }
+
+        if fallback_name == "skip_consequence_check":
+            return {
+                "success": True,
+                "message": "Consequence evaluation was skipped due to an internal issue.",
+                "state_updates": {}
+            }
+
         if fallback_name == "basic_narrative":
             return {
                 "success": True,
