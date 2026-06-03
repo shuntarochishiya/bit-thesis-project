@@ -14,6 +14,10 @@ from agents.exploration_agent import ExplorationAgent
 from agents.narrative_agent import NarrativeGenerationAgent
 from agents.tavern_agent import TavernAgent
 from agents.consequence_agent import ConsequenceAgent
+from agents.precondition_agent import PreconditionAgent
+from agents.combat_step_agent import CombatStepAgent
+from agents.persuasion_step_agent import PersuasionStepAgent
+from agents.dialogue_step_agent import DialogueStepAgent
 
 
 class ExecutionEngine:
@@ -34,10 +38,14 @@ class ExecutionEngine:
         fallback_manager: FallbackManager,
         consequence_agent: ConsequenceAgent,
         combat_agent: CombatAgent,
+        combat_step_agent: CombatStepAgent,
         tavern_agent: TavernAgent,
         persuasion_agent: PersuasionAgent,
+        persuasion_step_agent: PersuasionStepAgent,
         exploration_agent: ExplorationAgent,
         dialogue_agent: DialogueAgent,
+        dialogue_step_agent: DialogueStepAgent,
+        precondition_agent: PreconditionAgent,
         narrative_agent: NarrativeGenerationAgent
     ):
         self.game_state_manager = game_state_manager
@@ -47,12 +55,16 @@ class ExecutionEngine:
         self.execution_logger = execution_logger
         self.fallback_manager = fallback_manager
         self.consequence_agent = consequence_agent
+        self.precondition_agent = precondition_agent
 
         self.tavern_agent = tavern_agent
         self.combat_agent = combat_agent
+        self.combat_step_agent = combat_step_agent
         self.persuasion_agent = persuasion_agent
+        self.persuasion_step_agent = persuasion_step_agent
         self.exploration_agent = exploration_agent
         self.dialogue_agent = dialogue_agent
+        self.dialogue_step_agent = dialogue_step_agent
         self.narrative_agent = narrative_agent
 
     def apply_state_updates(
@@ -120,12 +132,38 @@ class ExecutionEngine:
 
         execution_context: Dict[str, Any] = {
             "semantic_memory_results": [],
+            "precondition_results": [],
+            "combat_context": {
+                "hit": False,
+                "hit_roll": None,
+                "damage": 0,
+                "target_defeated": False,
+                "projected_health": None,
+                "health_key": None
+            },
             "consequence_result": {
                 "allow_action": True,
                 "reason": "No consequence evaluation has been performed yet.",
                 "reaction_modifier": "neutral",
                 "state_updates": {},
                 "system_note": ""
+            },
+            "persuasion_context": {
+                "relationship_score": 0,
+                "relationship_modifier": 0,
+                "reputation_score": 0,
+                "reputation_modifier": 0,
+                "persuasion_chance": 0,
+                "roll": None,
+                "persuasion_success": False
+            },
+            "dialogue_context": {
+                "npc_attitude": "neutral",
+                "attitude_modifier": 0,
+                "dialogue_topic": "general_conversation",
+                "dialogue_tone": "neutral",
+                "dialogue_location": None,
+                "dialogue_strategy": "neutral_response"
             },
             "action_blocked": False
         }
@@ -157,6 +195,58 @@ class ExecutionEngine:
                             "state_updates": {}
                         }
 
+                    elif agent_type == "precondition":
+                        check_name = task.get("check")
+
+                        if check_name == "validate_location":
+                            result = self.precondition_agent.validate_location(
+                                intent=intent,
+                                target=target,
+                                game_state=game_state,
+                                player_input=player_input
+                            )
+
+                        elif check_name == "check_player_resources":
+                            result = self.precondition_agent.check_player_resources(
+                                intent=intent,
+                                target=target,
+                                game_state=game_state,
+                                player_input=player_input
+                            )
+
+                        elif check_name == "check_target_status":
+                            result = self.precondition_agent.check_target_status(
+                                intent=intent,
+                                target=target,
+                                game_state=game_state,
+                                player_input=player_input
+                            )
+
+                        else:
+                            raise Exception(f"Unknown precondition check: {check_name}")
+
+                        execution_context["precondition_results"].append(result)
+
+                        if not result["success"]:
+                            execution_context["action_blocked"] = True
+                            execution_context["consequence_result"] = {
+                                "allow_action": False,
+                                "reason": result["message"],
+                                "reaction_modifier": "blocked_by_precondition",
+                                "state_updates": {},
+                                "system_note": (
+                                    f"Action blocked by precondition check: "
+                                    f"{result.get('precondition_type')}"
+                                )
+                            }
+
+                            execution_result = result["message"]
+
+                        else:
+                            execution_result = result["message"]
+
+                        completed_tasks[task_id] = result
+
                     elif agent_type == "semantic_memory":
                         current_state = self.game_state_manager.get_state()
 
@@ -184,47 +274,132 @@ class ExecutionEngine:
                         }
 
                     elif agent_type == "consequence":
-                        current_state = self.game_state_manager.get_state()
+                        # If a precondition already blocked the action,
+                        # do not overwrite the blocking reason.
+                        if execution_context["action_blocked"]:
+                            consequence_result = execution_context["consequence_result"]
 
-                        consequence_result = self.consequence_agent.evaluate(
-                            player_input=player_input,
-                            intent=intent,
-                            target=target,
-                            game_state=current_state,
-                            relevant_memory=execution_context["semantic_memory_results"]
-                        )
+                            self.execution_logger.set_consequence_decision(consequence_result)
 
-                        execution_context["consequence_result"] = consequence_result
-                        self.execution_logger.set_consequence_decision(consequence_result)
+                            execution_result = consequence_result["reason"]
 
-                        if consequence_result.get("state_updates"):
-                            self.apply_state_updates(
-                                updates=consequence_result["state_updates"],
-                                source="ConsequenceAgent",
-                                reason=consequence_result.get(
+                            completed_tasks[task_id] = {
+                                "success": False,
+                                "message": execution_result,
+                                "state_updates": {}
+                            }
+
+                        else:
+                            current_state = self.game_state_manager.get_state()
+
+                            consequence_result = self.consequence_agent.evaluate(
+                                player_input=player_input,
+                                intent=intent,
+                                target=target,
+                                game_state=current_state,
+                                relevant_memory=execution_context["semantic_memory_results"]
+                            )
+
+                            execution_context["consequence_result"] = consequence_result
+                            self.execution_logger.set_consequence_decision(consequence_result)
+
+                            if consequence_result.get("state_updates"):
+                                self.apply_state_updates(
+                                    updates=consequence_result["state_updates"],
+                                    source="ConsequenceAgent",
+                                    reason=consequence_result.get(
+                                        "reason",
+                                        "Consequence-based state update"
+                                    ),
+                                    snapshot_id=snapshot_id
+                                )
+
+                            if not consequence_result.get("allow_action", True):
+                                execution_context["action_blocked"] = True
+                                execution_result = consequence_result.get(
                                     "reason",
-                                    "Consequence-based state update"
-                                ),
+                                    "The action was blocked by ConsequenceAgent."
+                                )
+                            else:
+                                execution_result = consequence_result.get(
+                                    "system_note",
+                                    "Consequence evaluation completed."
+                                )
+
+                            completed_tasks[task_id] = {
+                                "success": consequence_result.get("allow_action", True),
+                                "message": execution_result,
+                                "state_updates": consequence_result.get("state_updates", {})
+                            }
+
+                    elif agent_type == "combat_step":
+                        step_name = task.get("step")
+                        combat_context = execution_context["combat_context"]
+
+                        if step_name == "calculate_hit":
+                            result = self.combat_step_agent.calculate_hit(
+                                action_blocked=execution_context["action_blocked"]
+                            )
+
+                        elif step_name == "calculate_damage":
+                            result = self.combat_step_agent.calculate_damage(
+                                hit=combat_context["hit"],
+                                action_blocked=execution_context["action_blocked"]
+                            )
+
+                        elif step_name == "check_death":
+                            result = self.combat_step_agent.check_death(
+                                game_state=game_state,
+                                target=target,
+                                hit=combat_context["hit"],
+                                damage=combat_context["damage"],
+                                action_blocked=execution_context["action_blocked"]
+                            )
+
+                        elif step_name == "apply_combat_result":
+                            result = self.combat_step_agent.apply_combat_result(
+                                game_state=game_state,
+                                target=target,
+                                hit=combat_context["hit"],
+                                damage=combat_context["damage"],
+                                target_defeated=combat_context["target_defeated"],
+                                action_blocked=execution_context["action_blocked"],
+                                blocked_reason=execution_context["consequence_result"].get(
+                                    "reason",
+                                    "The combat action was blocked."
+                                )
+                            )
+
+                            self.apply_state_updates(
+                                updates=result["state_updates"],
+                                source="CombatStepAgent",
+                                reason=result["message"],
                                 snapshot_id=snapshot_id
                             )
 
-                        if not consequence_result.get("allow_action", True):
-                            execution_context["action_blocked"] = True
-                            execution_result = consequence_result.get(
-                                "reason",
-                                "The action was blocked by ConsequenceAgent."
-                            )
-                        else:
-                            execution_result = consequence_result.get(
-                                "system_note",
-                                "Consequence evaluation completed."
+                        elif step_name == "enemy_reaction":
+                            result = self.combat_step_agent.enemy_reaction(
+                                game_state=game_state,
+                                target=target,
+                                target_defeated=combat_context["target_defeated"],
+                                action_blocked=execution_context["action_blocked"]
                             )
 
-                        completed_tasks[task_id] = {
-                            "success": consequence_result.get("allow_action", True),
-                            "message": execution_result,
-                            "state_updates": consequence_result.get("state_updates", {})
-                        }
+                            self.apply_state_updates(
+                                updates=result["state_updates"],
+                                source="CombatStepAgent",
+                                reason=result["message"],
+                                snapshot_id=snapshot_id
+                            )
+
+                        else:
+                            raise Exception(f"Unknown combat step: {step_name}")
+
+                        if "data" in result:
+                            combat_context.update(result["data"])
+
+                        execution_result = result["message"]
+                        completed_tasks[task_id] = result
 
                     elif agent_type == "combat":
                         if execution_context["action_blocked"]:
@@ -242,6 +417,63 @@ class ExecutionEngine:
                         execution_result = result["message"]
                         completed_tasks[task_id] = result
 
+                    elif agent_type == "persuasion_step":
+                        step_name = task.get("step")
+                        persuasion_context = execution_context["persuasion_context"]
+
+                        if step_name == "analyze_relationship":
+                            result = self.persuasion_step_agent.analyze_relationship(
+                                game_state=game_state,
+                                target=target,
+                                relevant_memory=execution_context["semantic_memory_results"],
+                                action_blocked=execution_context["action_blocked"]
+                            )
+
+                        elif step_name == "analyze_reputation":
+                            result = self.persuasion_step_agent.analyze_reputation(
+                                game_state=game_state,
+                                relevant_memory=execution_context["semantic_memory_results"],
+                                action_blocked=execution_context["action_blocked"]
+                            )
+
+                        elif step_name == "calculate_persuasion_chance":
+                            result = self.persuasion_step_agent.calculate_persuasion_chance(
+                                relationship_score=persuasion_context["relationship_score"],
+                                reputation_score=persuasion_context["reputation_score"],
+                                action_blocked=execution_context["action_blocked"]
+                            )
+
+                        elif step_name == "apply_persuasion_result":
+                            result = self.persuasion_step_agent.apply_persuasion_result(
+                                game_state=game_state,
+                                target=target,
+                                persuasion_success=persuasion_context["persuasion_success"],
+                                persuasion_chance=persuasion_context["persuasion_chance"],
+                                roll=persuasion_context["roll"],
+                                player_input=player_input,
+                                action_blocked=execution_context["action_blocked"],
+                                blocked_reason=execution_context["consequence_result"].get(
+                                    "reason",
+                                    "The persuasion action was blocked."
+                                )
+                            )
+
+                            self.apply_state_updates(
+                                updates=result["state_updates"],
+                                source="PersuasionStepAgent",
+                                reason=result["message"],
+                                snapshot_id=snapshot_id
+                            )
+
+                        else:
+                            raise Exception(f"Unknown persuasion step: {step_name}")
+
+                        if "data" in result:
+                            persuasion_context.update(result["data"])
+
+                        execution_result = result["message"]
+                        completed_tasks[task_id] = result
+
                     elif agent_type == "persuasion":
                         if execution_context["action_blocked"]:
                             result = self.build_blocked_action_result(execution_context)
@@ -254,6 +486,67 @@ class ExecutionEngine:
                             reason=result["message"],
                             snapshot_id=snapshot_id
                         )
+
+                        execution_result = result["message"]
+                        completed_tasks[task_id] = result
+
+                    elif agent_type == "dialogue_step":
+                        step_name = task.get("step")
+                        dialogue_context = execution_context["dialogue_context"]
+
+                        if step_name == "analyze_npc_attitude":
+                            result = self.dialogue_step_agent.analyze_npc_attitude(
+                                game_state=game_state,
+                                target=target,
+                                relevant_memory=execution_context["semantic_memory_results"],
+                                action_blocked=execution_context["action_blocked"]
+                            )
+
+                        elif step_name == "analyze_dialogue_context":
+                            result = self.dialogue_step_agent.analyze_dialogue_context(
+                                game_state=game_state,
+                                target=target,
+                                player_input=player_input,
+                                relevant_memory=execution_context["semantic_memory_results"],
+                                action_blocked=execution_context["action_blocked"]
+                            )
+
+                        elif step_name == "choose_dialogue_strategy":
+                            result = self.dialogue_step_agent.choose_dialogue_strategy(
+                                npc_attitude=dialogue_context["npc_attitude"],
+                                dialogue_topic=dialogue_context["dialogue_topic"],
+                                dialogue_tone=dialogue_context["dialogue_tone"],
+                                target=target,
+                                action_blocked=execution_context["action_blocked"]
+                            )
+
+                        elif step_name == "apply_dialogue_result":
+                            result = self.dialogue_step_agent.apply_dialogue_result(
+                                game_state=game_state,
+                                target=target,
+                                npc_attitude=dialogue_context["npc_attitude"],
+                                dialogue_topic=dialogue_context["dialogue_topic"],
+                                dialogue_tone=dialogue_context["dialogue_tone"],
+                                dialogue_strategy=dialogue_context["dialogue_strategy"],
+                                action_blocked=execution_context["action_blocked"],
+                                blocked_reason=execution_context["consequence_result"].get(
+                                    "reason",
+                                    "The dialogue action was blocked."
+                                )
+                            )
+
+                            self.apply_state_updates(
+                                updates=result["state_updates"],
+                                source="DialogueStepAgent",
+                                reason=result["message"],
+                                snapshot_id=snapshot_id
+                            )
+
+                        else:
+                            raise Exception(f"Unknown dialogue step: {step_name}")
+
+                        if "data" in result:
+                            dialogue_context.update(result["data"])
 
                         execution_result = result["message"]
                         completed_tasks[task_id] = result
@@ -349,8 +642,8 @@ class ExecutionEngine:
                             recent_memory
                             + execution_context["semantic_memory_results"]
                             + [
-                                f"Consequence decision: "
-                                f"{execution_context['consequence_result']}"
+                                f"Precondition results: {execution_context['precondition_results']}",
+                                f"Consequence decision: {execution_context['consequence_result']}"
                             ]
                         )
 

@@ -33,7 +33,7 @@ class IntentRecognitionAgent:
         ]
 
         enemy_words = [
-            "goblin", "enemy", "monster", "creature", "beast", "orc"
+            "goblin", "enemy", "monster", "creature", "beast", "orc", "ghoul"
         ]
 
         attack_words = [
@@ -71,9 +71,10 @@ class IntentRecognitionAgent:
 
         persuasion_words = [
             "persuade", "convince", "discount", "bargain",
-            "request", "free", "cheaper", "price",
-            "give me", "trade", "sell", "offer",
-            "artifact", "item", "goods"
+            "request", "free", "cheaper", "price", "lower price",
+            "better price", "give me", "trade", "sell", "offer",
+            "artifact", "item", "goods", "deal", "negotiate",
+            "lower the price", "reduce the price"
         ]
 
         exploration_words = [
@@ -153,13 +154,16 @@ class IntentRecognitionAgent:
         if is_enemy_target and any(word in text for word in dialogue_words):
             return {"intent": "dialogue_action", "target": "enemy"}
 
-        # 7. Dialogue with merchant
-        if is_merchant_target and any(word in text for word in dialogue_words):
-            return {"intent": "dialogue_action", "target": "merchant"}
-
-        # 8. Persuasion / trade intent with merchant
+        # 7. Persuasion / trade intent with merchant
+        # This must be checked before regular dialogue,
+        # because phrases like "ask the merchant for a discount"
+        # contain dialogue words but are actually persuasion/trade actions.
         if is_merchant_target and any(word in text for word in persuasion_words):
             return {"intent": "persuasion_action", "target": "merchant"}
+
+        # 8. Dialogue with merchant
+        if is_merchant_target and any(word in text for word in dialogue_words):
+            return {"intent": "dialogue_action", "target": "merchant"}
 
         # 9. Exploration / movement
         if any(phrase in text for phrase in exploration_phrases):

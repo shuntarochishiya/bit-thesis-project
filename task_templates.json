@@ -1,10 +1,17 @@
 {
-    "combat_action": [
+  "combat_action": [
     {
       "task_id": "validate_action",
       "depends_on": [],
       "agent": "validation",
       "fallback": "cancel_action"
+    },
+    {
+      "task_id": "check_target_status",
+      "depends_on": [],
+      "agent": "precondition",
+      "check": "check_target_status",
+      "fallback": "safe_precondition_response"
     },
     {
       "task_id": "retrieve_semantic_memory",
@@ -14,36 +21,76 @@
     },
     {
       "task_id": "evaluate_consequences",
-      "depends_on": ["validate_action", "retrieve_semantic_memory"],
+      "depends_on": [
+        "validate_action",
+        "check_target_status",
+        "retrieve_semantic_memory"
+      ],
       "agent": "consequence",
       "fallback": "skip_consequence_check"
     },
     {
-      "task_id": "execute_combat",
+      "task_id": "calculate_hit",
       "depends_on": ["evaluate_consequences"],
-      "agent": "combat",
+      "agent": "combat_step",
+      "step": "calculate_hit",
+      "fallback": "safe_combat_response"
+    },
+    {
+      "task_id": "calculate_damage",
+      "depends_on": ["calculate_hit"],
+      "agent": "combat_step",
+      "step": "calculate_damage",
+      "fallback": "safe_combat_response"
+    },
+    {
+      "task_id": "check_death",
+      "depends_on": ["calculate_damage"],
+      "agent": "combat_step",
+      "step": "check_death",
+      "fallback": "safe_combat_response"
+    },
+    {
+      "task_id": "apply_combat_result",
+      "depends_on": ["check_death"],
+      "agent": "combat_step",
+      "step": "apply_combat_result",
+      "fallback": "safe_combat_response"
+    },
+    {
+      "task_id": "enemy_reaction",
+      "depends_on": ["apply_combat_result"],
+      "agent": "combat_step",
+      "step": "enemy_reaction",
       "fallback": "safe_combat_response"
     },
     {
       "task_id": "update_memory",
-      "depends_on": ["execute_combat"],
+      "depends_on": ["enemy_reaction"],
       "agent": "memory",
       "fallback": "skip_memory_update"
     },
     {
       "task_id": "generate_narrative",
-      "depends_on": ["execute_combat", "update_memory"],
+      "depends_on": ["enemy_reaction", "update_memory"],
       "agent": "narrative",
       "fallback": "basic_narrative"
     }
   ],
 
-    "persuasion_action": [
+  "persuasion_action": [
     {
       "task_id": "validate_action",
       "depends_on": [],
       "agent": "validation",
       "fallback": "cancel_action"
+    },
+    {
+      "task_id": "check_target_status",
+      "depends_on": [],
+      "agent": "precondition",
+      "check": "check_target_status",
+      "fallback": "safe_precondition_response"
     },
     {
       "task_id": "retrieve_semantic_memory",
@@ -53,31 +100,57 @@
     },
     {
       "task_id": "evaluate_consequences",
-      "depends_on": ["validate_action", "retrieve_semantic_memory"],
+      "depends_on": [
+        "validate_action",
+        "check_target_status",
+        "retrieve_semantic_memory"
+      ],
       "agent": "consequence",
       "fallback": "skip_consequence_check"
     },
     {
-      "task_id": "execute_persuasion",
+      "task_id": "analyze_relationship",
       "depends_on": ["evaluate_consequences"],
-      "agent": "persuasion",
+      "agent": "persuasion_step",
+      "step": "analyze_relationship",
+      "fallback": "safe_persuasion_response"
+    },
+    {
+      "task_id": "analyze_reputation",
+      "depends_on": ["evaluate_consequences"],
+      "agent": "persuasion_step",
+      "step": "analyze_reputation",
+      "fallback": "safe_persuasion_response"
+    },
+    {
+      "task_id": "calculate_persuasion_chance",
+      "depends_on": ["analyze_relationship", "analyze_reputation"],
+      "agent": "persuasion_step",
+      "step": "calculate_persuasion_chance",
+      "fallback": "safe_persuasion_response"
+    },
+    {
+      "task_id": "apply_persuasion_result",
+      "depends_on": ["calculate_persuasion_chance"],
+      "agent": "persuasion_step",
+      "step": "apply_persuasion_result",
       "fallback": "safe_persuasion_response"
     },
     {
       "task_id": "update_memory",
-      "depends_on": ["execute_persuasion"],
+      "depends_on": ["apply_persuasion_result"],
       "agent": "memory",
       "fallback": "skip_memory_update"
     },
     {
       "task_id": "generate_narrative",
-      "depends_on": ["execute_persuasion", "update_memory"],
+      "depends_on": ["apply_persuasion_result", "update_memory"],
       "agent": "narrative",
       "fallback": "basic_narrative"
     }
   ],
 
-    "exploration_action": [
+  "exploration_action": [
     {
       "task_id": "retrieve_semantic_memory",
       "depends_on": [],
@@ -104,7 +177,14 @@
     }
   ],
 
-    "dialogue_action": [
+  "dialogue_action": [
+    {
+      "task_id": "check_target_status",
+      "depends_on": [],
+      "agent": "precondition",
+      "check": "check_target_status",
+      "fallback": "safe_precondition_response"
+    },
     {
       "task_id": "retrieve_semantic_memory",
       "depends_on": [],
@@ -113,31 +193,80 @@
     },
     {
       "task_id": "evaluate_consequences",
-      "depends_on": ["retrieve_semantic_memory"],
+      "depends_on": [
+        "check_target_status",
+        "retrieve_semantic_memory"
+      ],
       "agent": "consequence",
       "fallback": "skip_consequence_check"
     },
     {
-      "task_id": "execute_dialogue",
+      "task_id": "analyze_npc_attitude",
       "depends_on": ["evaluate_consequences"],
-      "agent": "dialogue",
+      "agent": "dialogue_step",
+      "step": "analyze_npc_attitude",
+      "fallback": "safe_dialogue_response"
+    },
+    {
+      "task_id": "analyze_dialogue_context",
+      "depends_on": ["evaluate_consequences"],
+      "agent": "dialogue_step",
+      "step": "analyze_dialogue_context",
+      "fallback": "safe_dialogue_response"
+    },
+    {
+      "task_id": "choose_dialogue_strategy",
+      "depends_on": [
+        "analyze_npc_attitude",
+        "analyze_dialogue_context"
+      ],
+      "agent": "dialogue_step",
+      "step": "choose_dialogue_strategy",
+      "fallback": "safe_dialogue_response"
+    },
+    {
+      "task_id": "apply_dialogue_result",
+      "depends_on": ["choose_dialogue_strategy"],
+      "agent": "dialogue_step",
+      "step": "apply_dialogue_result",
       "fallback": "safe_dialogue_response"
     },
     {
       "task_id": "update_memory",
-      "depends_on": ["execute_dialogue"],
+      "depends_on": ["apply_dialogue_result"],
       "agent": "memory",
       "fallback": "skip_memory_update"
     },
     {
       "task_id": "generate_narrative",
-      "depends_on": ["execute_dialogue", "update_memory"],
+      "depends_on": ["apply_dialogue_result", "update_memory"],
       "agent": "narrative",
       "fallback": "basic_narrative"
     }
   ],
 
-    "tavern_action": [
+  "tavern_action": [
+    {
+      "task_id": "validate_location",
+      "depends_on": [],
+      "agent": "precondition",
+      "check": "validate_location",
+      "fallback": "safe_precondition_response"
+    },
+    {
+      "task_id": "check_player_resources",
+      "depends_on": [],
+      "agent": "precondition",
+      "check": "check_player_resources",
+      "fallback": "safe_precondition_response"
+    },
+    {
+      "task_id": "check_target_status",
+      "depends_on": [],
+      "agent": "precondition",
+      "check": "check_target_status",
+      "fallback": "safe_precondition_response"
+    },
     {
       "task_id": "retrieve_semantic_memory",
       "depends_on": [],
@@ -146,7 +275,12 @@
     },
     {
       "task_id": "evaluate_consequences",
-      "depends_on": ["retrieve_semantic_memory"],
+      "depends_on": [
+        "validate_location",
+        "check_player_resources",
+        "check_target_status",
+        "retrieve_semantic_memory"
+      ],
       "agent": "consequence",
       "fallback": "skip_consequence_check"
     },

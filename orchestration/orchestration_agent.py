@@ -17,10 +17,14 @@ from agents.primitive_agents import AttributeCalculationAgent, ValidationAgent
 from agents.combat_agent import CombatAgent
 from agents.persuasion_agent import PersuasionAgent
 from agents.dialogue_agent import DialogueAgent
+from agents.dialogue_step_agent import DialogueStepAgent
 from agents.exploration_agent import ExplorationAgent
 from agents.narrative_agent import NarrativeGenerationAgent
 from agents.tavern_agent import TavernAgent
 from agents.consequence_agent import ConsequenceAgent
+from agents.precondition_agent import PreconditionAgent
+from agents.combat_step_agent import CombatStepAgent
+from agents.persuasion_step_agent import PersuasionStepAgent
 
 from engine.task_planner import TaskPlanner
 from engine.execution_engine import ExecutionEngine
@@ -40,6 +44,7 @@ class OrchestrationAgent:
 
         self.game_state_manager = GameStateManager()
         self.context_manager = ContextManager()
+        self.precondition_agent = PreconditionAgent()
 
         self.memory_system = MemorySystem(memory_path=MEMORY_PATH)
         self.semantic_memory_system = SemanticMemorySystem(
@@ -59,9 +64,12 @@ class OrchestrationAgent:
 
         self.combat_agent = CombatAgent(self.attribute_agent, self.validation_agent)
         self.persuasion_agent = PersuasionAgent(self.attribute_agent, self.validation_agent)
+        self.persuasion_step_agent = PersuasionStepAgent()
         self.exploration_agent = ExplorationAgent()
         self.dialogue_agent = DialogueAgent()
+        self.dialogue_step_agent = DialogueStepAgent()
         self.tavern_agent = TavernAgent()
+        self.combat_step_agent = CombatStepAgent()
 
         self.consequence_agent = ConsequenceAgent()
         self.narrative_agent = NarrativeGenerationAgent(self.llm)
@@ -75,10 +83,14 @@ class OrchestrationAgent:
             fallback_manager=self.fallback_manager,
             combat_agent=self.combat_agent,
             persuasion_agent=self.persuasion_agent,
+            persuasion_step_agent=self.persuasion_step_agent,
             exploration_agent=self.exploration_agent,
             narrative_agent=self.narrative_agent,
             dialogue_agent=self.dialogue_agent,
+            dialogue_step_agent=self.dialogue_step_agent,
             tavern_agent=self.tavern_agent,
+            combat_step_agent=self.combat_step_agent,
+            precondition_agent=self.precondition_agent
         )
 
     def process_player_input(self, player_input: str) -> str:

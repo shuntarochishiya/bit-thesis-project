@@ -86,6 +86,13 @@ class FallbackManager:
                 "state_updates": {}
             }
 
+        if fallback_name == "safe_precondition_response":
+            return {
+                "success": False,
+                "message": "A precondition check failed, so the action was safely stopped.",
+                "state_updates": {}
+            }
+
         return {
             "success": False,
             "message": f"Task '{task_id}' failed, but the system recovered using a generic fallback.",
