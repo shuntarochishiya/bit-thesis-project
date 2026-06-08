@@ -124,5 +124,89 @@
       "location": "tavern",
       "world_mood": "warm"
     }
+  },
+  {
+    "timestamp": "2026-06-05T16:12:51",
+    "player_input": "hello there",
+    "intent": "general_action",
+    "target": "unknown",
+    "system_result": "Semantic memory retrieval completed.",
+    "state_changes": {},
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 50,
+      "bartender_mood": "neutral",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "old forest",
+      "world_mood": "mysterious"
+    }
+  },
+  {
+    "timestamp": "2026-06-05T16:13:03",
+    "player_input": "I enter the tavern and greet a tender",
+    "intent": "tavern_action",
+    "target": "bartender",
+    "system_result": "The tavern is noisy, warm, and full of tired travelers. The bartender waits behind the counter.",
+    "state_changes": {
+      "world_mood": {
+        "before": "mysterious",
+        "after": "warm"
+      },
+      "location": {
+        "before": "old forest",
+        "after": "tavern"
+      }
+    },
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 50,
+      "bartender_mood": "neutral",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "tavern",
+      "world_mood": "warm"
+    }
+  },
+  {
+    "timestamp": "2026-06-05T16:40:23",
+    "player_input": "hello there",
+    "intent": "general_action",
+    "target": "unknown",
+    "system_result": "Semantic memory retrieval completed.",
+    "state_changes": {},
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 50,
+      "bartender_mood": "neutral",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "old forest",
+      "world_mood": "mysterious"
+    }
   }
 ]
