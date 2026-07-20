@@ -18,6 +18,7 @@ from agents.precondition_agent import PreconditionAgent
 from agents.combat_step_agent import CombatStepAgent
 from agents.persuasion_step_agent import PersuasionStepAgent
 from agents.dialogue_step_agent import DialogueStepAgent
+from agents.event_agent import EventAgent
 
 
 class ExecutionEngine:
@@ -40,6 +41,7 @@ class ExecutionEngine:
         combat_agent: CombatAgent,
         combat_step_agent: CombatStepAgent,
         tavern_agent: TavernAgent,
+        event_agent: EventAgent,
         persuasion_agent: PersuasionAgent,
         persuasion_step_agent: PersuasionStepAgent,
         exploration_agent: ExplorationAgent,
@@ -58,6 +60,7 @@ class ExecutionEngine:
         self.precondition_agent = precondition_agent
 
         self.tavern_agent = tavern_agent
+        self.event_agent = event_agent
         self.combat_agent = combat_agent
         self.combat_step_agent = combat_step_agent
         self.persuasion_agent = persuasion_agent
@@ -164,6 +167,14 @@ class ExecutionEngine:
                 "dialogue_tone": "neutral",
                 "dialogue_location": None,
                 "dialogue_strategy": "neutral_response"
+            },
+            "event_context": {
+                "event_probabilities": {},
+                "requested_location": None,
+                "selected_event": None,
+                "event_plausible": True,
+                "plausibility_reason": "",
+                "final_event": None
             },
             "action_blocked": False
         }
@@ -567,6 +578,55 @@ class ExecutionEngine:
                         execution_result = result["message"]
                         completed_tasks[task_id] = result
 
+                    elif agent_type == "event_step":
+                        step_name = task.get("step")
+                        event_context = execution_context["event_context"]
+
+                        if step_name == "calculate_event_probabilities":
+                            result = self.event_agent.calculate_event_probabilities(
+                                game_state=game_state,
+                                player_input=player_input,
+                                relevant_memory=execution_context["semantic_memory_results"]
+                            )
+
+                        elif step_name == "sample_event":
+                            result = self.event_agent.sample_event(
+                                event_probabilities=event_context["event_probabilities"]
+                            )
+
+                        elif step_name == "check_event_plausibility":
+                            result = self.event_agent.check_event_plausibility(
+                                selected_event=event_context["selected_event"],
+                                requested_location=event_context["requested_location"],
+                                game_state=game_state,
+                                relevant_memory=execution_context["semantic_memory_results"]
+                            )
+
+                        elif step_name == "apply_event_result":
+                            result = self.event_agent.apply_event_result(
+                                selected_event=event_context["selected_event"],
+                                event_plausible=event_context["event_plausible"],
+                                requested_location=event_context["requested_location"],
+                                plausibility_reason=event_context["plausibility_reason"],
+                                game_state=game_state
+                            )
+
+                            self.apply_state_updates(
+                                updates=result["state_updates"],
+                                source="EventAgent",
+                                reason=result["message"],
+                                snapshot_id=snapshot_id
+                            )
+
+                        else:
+                            raise Exception(f"Unknown event step: {step_name}")
+
+                        if "data" in result:
+                            event_context.update(result["data"])
+
+                        execution_result = result["message"]
+                        completed_tasks[task_id] = result
+
                     elif agent_type == "exploration":
                         if execution_context["action_blocked"]:
                             result = self.build_blocked_action_result(execution_context)
@@ -643,7 +703,8 @@ class ExecutionEngine:
                             + execution_context["semantic_memory_results"]
                             + [
                                 f"Precondition results: {execution_context['precondition_results']}",
-                                f"Consequence decision: {execution_context['consequence_result']}"
+                                f"Consequence decision: {execution_context['consequence_result']}",
+                                f"Event context: {execution_context['event_context']}"
                             ]
                         )
 

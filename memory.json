@@ -208,5 +208,105 @@
       "location": "old forest",
       "world_mood": "mysterious"
     }
+  },
+  {
+    "timestamp": "2026-07-20T09:12:44",
+    "player_input": "I explore the forest",
+    "intent": "exploration_action",
+    "target": "environment",
+    "system_result": "The player finds fresh footprints leading deeper into the area.",
+    "state_changes": {},
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 50,
+      "bartender_mood": "neutral",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "old forest",
+      "world_mood": "mysterious"
+    }
+  },
+  {
+    "timestamp": "2026-07-20T09:15:33",
+    "player_input": "I explore the forest",
+    "intent": "exploration_action",
+    "target": "environment",
+    "system_result": "The player discovers a narrow hidden path behind thick branches.",
+    "state_changes": {},
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 50,
+      "bartender_mood": "neutral",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "old forest",
+      "world_mood": "mysterious"
+    }
+  },
+  {
+    "timestamp": "2026-07-20T09:29:24",
+    "player_input": "I explore the forest",
+    "intent": "exploration_action",
+    "target": "environment",
+    "system_result": "The player discovers a narrow hidden path behind thick branches.",
+    "state_changes": {},
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 50,
+      "bartender_mood": "neutral",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "old forest",
+      "world_mood": "mysterious"
+    }
+  },
+  {
+    "timestamp": "2026-07-20T09:31:10",
+    "player_input": "I explore the forest",
+    "intent": "exploration_action",
+    "target": "environment",
+    "system_result": "The player finds fresh footprints leading deeper into the area.",
+    "state_changes": {},
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 50,
+      "bartender_mood": "neutral",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "old forest",
+      "world_mood": "mysterious"
+    }
   }
 ]

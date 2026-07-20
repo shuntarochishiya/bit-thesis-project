@@ -158,20 +158,42 @@
       "fallback": "skip_semantic_memory"
     },
     {
-      "task_id": "execute_exploration",
+      "task_id": "calculate_event_probabilities",
       "depends_on": ["retrieve_semantic_memory"],
-      "agent": "exploration",
-      "fallback": "safe_exploration_response"
+      "agent": "event_step",
+      "step": "calculate_event_probabilities",
+      "fallback": "safe_event_response"
+    },
+    {
+      "task_id": "sample_event",
+      "depends_on": ["calculate_event_probabilities"],
+      "agent": "event_step",
+      "step": "sample_event",
+      "fallback": "safe_event_response"
+    },
+    {
+      "task_id": "check_event_plausibility",
+      "depends_on": ["sample_event"],
+      "agent": "event_step",
+      "step": "check_event_plausibility",
+      "fallback": "safe_event_response"
+    },
+    {
+      "task_id": "apply_event_result",
+      "depends_on": ["check_event_plausibility"],
+      "agent": "event_step",
+      "step": "apply_event_result",
+      "fallback": "safe_event_response"
     },
     {
       "task_id": "update_memory",
-      "depends_on": ["execute_exploration"],
+      "depends_on": ["apply_event_result"],
       "agent": "memory",
       "fallback": "skip_memory_update"
     },
     {
       "task_id": "generate_narrative",
-      "depends_on": ["execute_exploration", "update_memory"],
+      "depends_on": ["apply_event_result", "update_memory"],
       "agent": "narrative",
       "fallback": "basic_narrative"
     }

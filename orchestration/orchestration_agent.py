@@ -25,6 +25,8 @@ from agents.consequence_agent import ConsequenceAgent
 from agents.precondition_agent import PreconditionAgent
 from agents.combat_step_agent import CombatStepAgent
 from agents.persuasion_step_agent import PersuasionStepAgent
+from agents.event_agent import EventAgent
+
 
 from engine.task_planner import TaskPlanner
 from engine.execution_engine import ExecutionEngine
@@ -70,6 +72,7 @@ class OrchestrationAgent:
         self.dialogue_step_agent = DialogueStepAgent()
         self.tavern_agent = TavernAgent()
         self.combat_step_agent = CombatStepAgent()
+        self.event_agent = EventAgent()
 
         self.consequence_agent = ConsequenceAgent()
         self.narrative_agent = NarrativeGenerationAgent(self.llm)
@@ -90,6 +93,7 @@ class OrchestrationAgent:
             dialogue_step_agent=self.dialogue_step_agent,
             tavern_agent=self.tavern_agent,
             combat_step_agent=self.combat_step_agent,
+            event_agent=self.event_agent,
             precondition_agent=self.precondition_agent
         )
 

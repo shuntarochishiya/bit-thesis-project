@@ -93,6 +93,13 @@ class FallbackManager:
                 "state_updates": {}
             }
 
+        if fallback_name == "safe_event_response":
+            return {
+                "success": True,
+                "message": "The event system failed, so the world remains quiet for now.",
+                "state_updates": {}
+            }
+
         return {
             "success": False,
             "message": f"Task '{task_id}' failed, but the system recovered using a generic fallback.",
