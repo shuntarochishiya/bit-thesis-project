@@ -174,7 +174,17 @@ class ExecutionEngine:
                 "selected_event": None,
                 "event_plausible": True,
                 "plausibility_reason": "",
-                "final_event": None
+                "conflict_detected": False,
+                "conflict_type": "none",
+                "conflict_severity": 0,
+                "conflict_participants": [],
+                "conflict_reason": "",
+                "conflict_status": "none",
+                "escalated_conflict_severity": 0,
+                "conflict_resolution_hint": "none",
+                "conflict_record": None,
+                "final_event": None,
+                "followup_event": None
             },
             "action_blocked": False
         }
@@ -602,12 +612,51 @@ class ExecutionEngine:
                                 relevant_memory=execution_context["semantic_memory_results"]
                             )
 
+                        elif step_name == "detect_conflict":
+                            result = self.event_agent.detect_conflict(
+                                selected_event=event_context["selected_event"],
+                                event_plausible=event_context["event_plausible"],
+                                game_state=game_state,
+                                player_input=player_input,
+                                relevant_memory=execution_context["semantic_memory_results"]
+                            )
+
+                        elif step_name == "escalate_conflict":
+                            result = self.event_agent.escalate_conflict(
+                                conflict_detected=event_context["conflict_detected"],
+                                conflict_type=event_context["conflict_type"],
+                                conflict_severity=event_context["conflict_severity"],
+                                conflict_participants=event_context["conflict_participants"],
+                                conflict_reason=event_context["conflict_reason"],
+                                game_state=game_state,
+                                player_input=player_input
+                            )
+
                         elif step_name == "apply_event_result":
                             result = self.event_agent.apply_event_result(
                                 selected_event=event_context["selected_event"],
                                 event_plausible=event_context["event_plausible"],
                                 requested_location=event_context["requested_location"],
                                 plausibility_reason=event_context["plausibility_reason"],
+                                game_state=game_state,
+                                conflict_detected=event_context["conflict_detected"],
+                                conflict_record=event_context["conflict_record"]
+                            )
+
+                            self.apply_state_updates(
+                                updates=result["state_updates"],
+                                source="EventAgent",
+                                reason=result["message"],
+                                snapshot_id=snapshot_id
+                            )
+
+                        elif step_name == "generate_followup_event":
+                            result = self.event_agent.generate_followup_event(
+                                final_event=event_context["final_event"],
+                                conflict_detected=event_context["conflict_detected"],
+                                conflict_type=event_context["conflict_type"],
+                                conflict_status=event_context["conflict_status"],
+                                conflict_severity=event_context["escalated_conflict_severity"],
                                 game_state=game_state
                             )
 

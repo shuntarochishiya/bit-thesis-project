@@ -40,7 +40,14 @@ class GameStateManager:
             "tavern_reputation": 50,
             "player_reputation": 50,
 
-            "world_mood": "mysterious"
+            "world_mood": "mysterious",
+            "world_danger": 20,
+            "guard_alert_level": 10,
+            "trade_activity": 60,
+            "crime_level": 0,
+            "active_conflicts": [],
+            "pending_events": [],
+            "recent_events": []
         }
 
         self.version: int = 0
@@ -166,7 +173,11 @@ class GameStateManager:
             "relationship_with_merchant": (0, 100),
             "relationship_with_bartender": (0, 100),
             "player_reputation": (0, 100),
-            "tavern_reputation": (0, 100)
+            "tavern_reputation": (0, 100),
+            "world_danger": (0, 100),
+            "guard_alert_level": (0, 100),
+            "trade_activity": (0, 100),
+            "crime_level": (0, 100)
         }
 
         for key, limits in numeric_limits.items():
@@ -182,8 +193,16 @@ class GameStateManager:
             if value < min_value or value > max_value:
                 return False
 
-        if not isinstance(self.state.get("inventory"), list):
-            return False
+        list_fields = [
+            "inventory",
+            "active_conflicts",
+            "pending_events",
+            "recent_events"
+        ]
+
+        for field in list_fields:
+            if not isinstance(self.state.get(field), list):
+                return False
 
         return True
 

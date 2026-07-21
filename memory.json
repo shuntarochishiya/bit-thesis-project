@@ -308,5 +308,194 @@
       "location": "old forest",
       "world_mood": "mysterious"
     }
+  },
+  {
+    "timestamp": "2026-07-20T09:53:05",
+    "player_input": "I explore the forest path",
+    "intent": "exploration_action",
+    "target": "environment",
+    "system_result": "No follow-up event was required.",
+    "state_changes": {
+      "world_danger": {
+        "before": 20,
+        "after": 23
+      },
+      "world_mood": {
+        "before": "mysterious",
+        "after": "tense"
+      },
+      "recent_events": {
+        "before": [],
+        "after": [
+          {
+            "event": "strange_noise",
+            "conflict": "none"
+          }
+        ]
+      }
+    },
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 50,
+      "bartender_mood": "neutral",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "old forest",
+      "world_mood": "tense"
+    }
+  },
+  {
+    "timestamp": "2026-07-20T09:56:30",
+    "player_input": "I go deeper into the old ruins.",
+    "intent": "exploration_action",
+    "target": "environment",
+    "system_result": "No follow-up event was required.",
+    "state_changes": {
+      "world_danger": {
+        "before": 23,
+        "after": 22
+      },
+      "world_mood": {
+        "before": "tense",
+        "after": "quiet"
+      },
+      "recent_events": {
+        "before": [
+          {
+            "event": "strange_noise",
+            "conflict": "none"
+          }
+        ],
+        "after": [
+          {
+            "event": "strange_noise",
+            "conflict": "none"
+          },
+          {
+            "event": "nothing_special",
+            "conflict": "none"
+          }
+        ]
+      },
+      "location": {
+        "before": "old forest",
+        "after": "old ruins"
+      }
+    },
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 50,
+      "bartender_mood": "neutral",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "old ruins",
+      "world_mood": "quiet"
+    }
+  },
+  {
+    "timestamp": "2026-07-20T09:59:22",
+    "player_input": "I explore the village after robbing the merchant.",
+    "intent": "exploration_action",
+    "target": "environment",
+    "system_result": "Follow-up event created: relationship_consequence.",
+    "state_changes": {
+      "world_danger": {
+        "before": 22,
+        "after": 25
+      },
+      "pending_events": {
+        "before": [],
+        "after": [
+          {
+            "event": "relationship_consequence",
+            "priority": "medium",
+            "trigger": "next_interaction_with_participant",
+            "description": "The participant will remember the conflict and adjust behavior."
+          }
+        ]
+      },
+      "world_mood": {
+        "before": "quiet",
+        "after": "tense"
+      },
+      "recent_events": {
+        "before": [
+          {
+            "event": "strange_noise",
+            "conflict": "none"
+          },
+          {
+            "event": "nothing_special",
+            "conflict": "none"
+          }
+        ],
+        "after": [
+          {
+            "event": "strange_noise",
+            "conflict": "none"
+          },
+          {
+            "event": "nothing_special",
+            "conflict": "none"
+          },
+          {
+            "event": "strange_noise",
+            "conflict": "social"
+          }
+        ]
+      },
+      "active_conflicts": {
+        "before": [],
+        "after": [
+          {
+            "type": "social",
+            "status": "active",
+            "severity": 50,
+            "participants": [
+              "player",
+              "unknown_entity"
+            ],
+            "reason": "The player's aggressive action creates a conflict."
+          }
+        ]
+      },
+      "location": {
+        "before": "old ruins",
+        "after": "village"
+      }
+    },
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 50,
+      "bartender_mood": "neutral",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "village",
+      "world_mood": "tense"
+    }
   }
 ]
