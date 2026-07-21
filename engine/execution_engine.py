@@ -1,6 +1,7 @@
 from typing import Dict, Any, List
 
 from state.game_state_manager import GameStateManager
+from state.npc_state_manager import NPCStateManager
 from memory.memory_system import MemorySystem
 from memory.semantic_memory import SemanticMemorySystem
 from engine.execution_logger import ExecutionLogger
@@ -48,9 +49,11 @@ class ExecutionEngine:
         dialogue_agent: DialogueAgent,
         dialogue_step_agent: DialogueStepAgent,
         precondition_agent: PreconditionAgent,
+        npc_state_manager: NPCStateManager,
         narrative_agent: NarrativeGenerationAgent
     ):
         self.game_state_manager = game_state_manager
+        self.npc_state_manager = npc_state_manager
         self.dag_scheduler = DAGScheduler()
         self.memory_system = memory_system
         self.semantic_memory_system = semantic_memory_system
@@ -69,6 +72,151 @@ class ExecutionEngine:
         self.dialogue_agent = dialogue_agent
         self.dialogue_step_agent = dialogue_step_agent
         self.narrative_agent = narrative_agent
+
+    @staticmethod
+    def _normalize_npc_target(target: str) -> str:
+        """Converts target aliases into NPCStateManager identifiers."""
+
+        if not target:
+            return ""
+
+        normalized_target = target.strip().lower().replace("-", "_").replace(" ", "_")
+
+        target_aliases = {
+            "barmaid": "bartender",
+            "barkeep": "bartender",
+            "vendor": "merchant",
+            "shopkeeper": "merchant",
+            "trader": "merchant",
+            "enemy": "forest_goblin",
+            "goblin": "forest_goblin",
+            "forest_goblin_enemy": "forest_goblin"
+        }
+
+        return target_aliases.get(normalized_target, normalized_target)
+
+    @staticmethod
+    def _detect_npc_event(
+        player_input: str,
+        intent: str,
+        npc_id: str
+    ) -> str | None:
+        """Maps a completed player action to an NPC relationship event."""
+
+        input_text = (player_input or "").lower()
+        normalized_intent = (intent or "").lower()
+
+        if any(phrase in input_text for phrase in (
+            "rob",
+            "steal",
+            "take his money",
+            "take her money",
+            "take their money"
+        )):
+            return "robbed"
+
+        if any(phrase in input_text for phrase in (
+            "threaten",
+            "intimidate",
+            "or else",
+            "i will hurt",
+            "i'll hurt"
+        )):
+            return "threatened"
+
+        if (
+            "combat" in normalized_intent
+            or any(phrase in input_text for phrase in (
+                "attack",
+                "hit ",
+                "strike",
+                "stab",
+                "shoot",
+                "punch",
+                "kick "
+            ))
+        ):
+            return "attacked"
+
+        if any(phrase in input_text for phrase in (
+            "insult",
+            "idiot",
+            "fool",
+            "stupid"
+        )):
+            return "insulted"
+
+        if any(phrase in input_text for phrase in (
+            "sorry",
+            "apologize",
+            "apologise",
+            "forgive me"
+        )):
+            return "apologized"
+
+        if npc_id == "merchant" and any(phrase in input_text for phrase in (
+            "buy",
+            "purchase",
+            "pay for"
+        )):
+            return "bought_goods"
+
+        if any(phrase in input_text for phrase in (
+            "help",
+            "assist",
+            "save",
+            "protect"
+        )):
+            return "helped"
+
+        return None
+
+    def _register_npc_event(
+        self,
+        player_input: str,
+        intent: str,
+        target: str,
+        action_blocked: bool
+    ) -> None:
+        """Updates NPC state once after a permitted player action."""
+
+        if action_blocked:
+            return
+
+        npc_id = self._normalize_npc_target(target)
+
+        known_npcs = {
+            "merchant",
+            "bartender",
+            "guard",
+            "traveler",
+            "forest_goblin"
+        }
+
+        if npc_id not in known_npcs:
+            return
+
+        event_type = self._detect_npc_event(
+            player_input=player_input,
+            intent=intent,
+            npc_id=npc_id
+        )
+
+        if event_type is None:
+            return
+
+        try:
+            self.npc_state_manager.apply_relationship_event(
+                npc_id=npc_id,
+                event_type=event_type
+            )
+            print(f"[NPC STATE] Applied '{event_type}' to '{npc_id}'.")
+
+        except (KeyError, ValueError) as error:
+            print(
+                f"[NPC STATE] Could not apply '{event_type}' "
+                f"to '{npc_id}': {error}"
+            )
 
     def apply_state_updates(
         self,
@@ -744,6 +892,13 @@ class ExecutionEngine:
                         }
 
                     elif agent_type == "narrative":
+                        self._register_npc_event(
+                            player_input=player_input,
+                            intent=intent,
+                            target=target,
+                            action_blocked=execution_context["action_blocked"]
+                        )
+
                         final_state = self.game_state_manager.get_state()
                         recent_memory = self.memory_system.retrieve_recent_events()
 
@@ -811,6 +966,13 @@ class ExecutionEngine:
                         )
 
                         return execution_result
+
+        self._register_npc_event(
+            player_input=player_input,
+            intent=intent,
+            target=target,
+            action_blocked=execution_context["action_blocked"]
+        )
 
         final_state = self.game_state_manager.get_state()
 

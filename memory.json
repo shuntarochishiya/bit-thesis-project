@@ -497,5 +497,76 @@
       "location": "village",
       "world_mood": "tense"
     }
+  },
+  {
+    "timestamp": "2026-07-21T08:53:53",
+    "player_input": "I attack the merchant",
+    "intent": "combat_action",
+    "target": "merchant",
+    "system_result": "No enemy reaction is needed for this target.",
+    "state_changes": {
+      "world_mood": {
+        "before": "mysterious",
+        "after": "dangerous"
+      },
+      "merchant_health": {
+        "before": 100,
+        "after": 89
+      },
+      "relationship_with_merchant": {
+        "before": 50,
+        "after": 0
+      },
+      "player_reputation": {
+        "before": 50,
+        "after": 25
+      },
+      "merchant_hostile": {
+        "before": false,
+        "after": true
+      }
+    },
+    "important_state": {
+      "merchant_health": 89,
+      "merchant_hostile": true,
+      "relationship_with_merchant": 0,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 50,
+      "bartender_mood": "neutral",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 25,
+      "enemy_health": 60,
+      "location": "old forest",
+      "world_mood": "dangerous"
+    }
+  },
+  {
+    "timestamp": "2026-07-21T09:04:08",
+    "player_input": "I ask merchant for a discount",
+    "intent": "persuasion_action",
+    "target": "merchant",
+    "system_result": "The merchant refuses because the player previously attacked or threatened them.",
+    "state_changes": {},
+    "important_state": {
+      "merchant_health": 89,
+      "merchant_hostile": true,
+      "relationship_with_merchant": 0,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 50,
+      "bartender_mood": "neutral",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 25,
+      "enemy_health": 60,
+      "location": "old forest",
+      "world_mood": "dangerous"
+    }
   }
 ]

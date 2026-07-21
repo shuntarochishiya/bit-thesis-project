@@ -6,14 +6,19 @@ from config import (
     CHROMA_PERSIST_DIR,
     CHROMA_COLLECTION_NAME
 )
+
 from memory.semantic_memory import SemanticMemorySystem
+from memory.memory_system import MemorySystem
 
 from state.game_state_manager import GameStateManager
 from state.context_manager import ContextManager
-from memory.memory_system import MemorySystem
+from state.npc_state_manager import NPCStateManager
 
 from agents.intent_agent import IntentRecognitionAgent
-from agents.primitive_agents import AttributeCalculationAgent, ValidationAgent
+from agents.primitive_agents import (
+    AttributeCalculationAgent,
+    ValidationAgent
+)
 from agents.combat_agent import CombatAgent
 from agents.persuasion_agent import PersuasionAgent
 from agents.dialogue_agent import DialogueAgent
@@ -26,7 +31,6 @@ from agents.precondition_agent import PreconditionAgent
 from agents.combat_step_agent import CombatStepAgent
 from agents.persuasion_step_agent import PersuasionStepAgent
 from agents.event_agent import EventAgent
-
 
 from engine.task_planner import TaskPlanner
 from engine.execution_engine import ExecutionEngine
@@ -44,28 +48,66 @@ class OrchestrationAgent:
         self.llm = create_llm()
         self.embeddings = create_embeddings()
 
+        # =========================
+        # State managers
+        # =========================
+
         self.game_state_manager = GameStateManager()
         self.context_manager = ContextManager()
-        self.precondition_agent = PreconditionAgent()
+        self.npc_state_manager = NPCStateManager()
 
-        self.memory_system = MemorySystem(memory_path=MEMORY_PATH)
+        # =========================
+        # Memory systems
+        # =========================
+
+        self.memory_system = MemorySystem(
+            memory_path=MEMORY_PATH
+        )
+
         self.semantic_memory_system = SemanticMemorySystem(
             embeddings=self.embeddings,
             persist_directory=CHROMA_PERSIST_DIR,
             collection_name=CHROMA_COLLECTION_NAME
         )
 
+        # =========================
+        # Infrastructure
+        # =========================
+
         self.execution_logger = ExecutionLogger()
         self.fallback_manager = FallbackManager()
 
+        # =========================
+        # Planning and intent
+        # =========================
+
         self.intent_agent = IntentRecognitionAgent()
-        self.task_planner = TaskPlanner(template_path=TASK_TEMPLATE_PATH)
+
+        self.task_planner = TaskPlanner(
+            template_path=TASK_TEMPLATE_PATH
+        )
+
+        # =========================
+        # Primitive agents
+        # =========================
 
         self.attribute_agent = AttributeCalculationAgent()
         self.validation_agent = ValidationAgent()
 
-        self.combat_agent = CombatAgent(self.attribute_agent, self.validation_agent)
-        self.persuasion_agent = PersuasionAgent(self.attribute_agent, self.validation_agent)
+        # =========================
+        # Domain agents
+        # =========================
+
+        self.combat_agent = CombatAgent(
+            self.attribute_agent,
+            self.validation_agent
+        )
+
+        self.persuasion_agent = PersuasionAgent(
+            self.attribute_agent,
+            self.validation_agent
+        )
+
         self.persuasion_step_agent = PersuasionStepAgent()
         self.exploration_agent = ExplorationAgent()
         self.dialogue_agent = DialogueAgent()
@@ -73,9 +115,23 @@ class OrchestrationAgent:
         self.tavern_agent = TavernAgent()
         self.combat_step_agent = CombatStepAgent()
         self.event_agent = EventAgent()
+        self.precondition_agent = PreconditionAgent()
 
-        self.consequence_agent = ConsequenceAgent()
-        self.narrative_agent = NarrativeGenerationAgent(self.llm)
+        # =========================
+        # Shared NPC-aware agent
+        # =========================
+
+        self.consequence_agent = ConsequenceAgent(
+            npc_state_manager=self.npc_state_manager
+        )
+
+        self.narrative_agent = NarrativeGenerationAgent(
+            self.llm
+        )
+
+        # =========================
+        # Execution engine
+        # =========================
 
         self.execution_engine = ExecutionEngine(
             game_state_manager=self.game_state_manager,
@@ -94,6 +150,7 @@ class OrchestrationAgent:
             tavern_agent=self.tavern_agent,
             combat_step_agent=self.combat_step_agent,
             event_agent=self.event_agent,
+            npc_state_manager=self.npc_state_manager,
             precondition_agent=self.precondition_agent
         )
 
@@ -101,7 +158,10 @@ class OrchestrationAgent:
         state_before = self.game_state_manager.get_state()
         current_context = self.context_manager.get_context()
 
-        self.execution_logger.start_turn(player_input, state_before)
+        self.execution_logger.start_turn(
+            player_input,
+            state_before
+        )
 
         intent_data = self.intent_agent.recognize_intent(
             player_input=player_input,
@@ -111,42 +171,89 @@ class OrchestrationAgent:
         intent = intent_data["intent"]
         target = intent_data["target"]
 
-        target = self.context_manager.resolve_target_from_context(target)
+        target = self.context_manager.resolve_target_from_context(
+            target
+        )
 
         text = player_input.lower()
 
         tavern_action_words = [
-            "drink", "ale", "beer", "wine", "mead", "liquor",
-            "glass", "cup", "bottle",
-            "room", "rent", "food", "meal", "rest", "sleep",
-            "order", "buy", "purchase",
-            "cheap", "simple", "regular", "good", "fine", "finest",
-            "expensive", "best", "premium", "royal",
-            "rumor", "rumour", "information", "news",
-            "odd", "strange", "weird", "nearby", "recently",
-            "anything", "happened", "details", "more details",
-            "explain", "tell me more", "what happened"
+            "drink",
+            "ale",
+            "beer",
+            "wine",
+            "mead",
+            "liquor",
+            "glass",
+            "cup",
+            "bottle",
+            "room",
+            "rent",
+            "food",
+            "meal",
+            "rest",
+            "sleep",
+            "order",
+            "buy",
+            "purchase",
+            "cheap",
+            "simple",
+            "regular",
+            "good",
+            "fine",
+            "finest",
+            "expensive",
+            "best",
+            "premium",
+            "royal",
+            "rumor",
+            "rumour",
+            "information",
+            "news",
+            "odd",
+            "strange",
+            "weird",
+            "nearby",
+            "recently",
+            "anything",
+            "happened",
+            "details",
+            "more details",
+            "explain",
+            "tell me more",
+            "what happened"
         ]
 
         if (
             intent == "general_action"
             and current_context.get("active_location") == "tavern"
-            and any(word in text for word in tavern_action_words)
+            and any(
+                word in text
+                for word in tavern_action_words
+            )
         ):
             intent = "tavern_action"
             target = "bartender"
 
-        self.execution_logger.set_intent(intent, target)
+        self.execution_logger.set_intent(
+            intent,
+            target
+        )
 
         plan = self.task_planner.build_plan(intent)
+
         self.execution_logger.set_dag(plan)
 
         print("\n[DEBUG] Recognized intent:", intent)
         print("[DEBUG] Target:", target)
         print("[DEBUG] Active context:", current_context)
         print("[DEBUG] Execution DAG:")
+
         for task in plan:
-            print(f"  - {task['task_id']} depends on {task['depends_on']}")
+            print(
+                f"  - {task['task_id']} "
+                f"depends on {task['depends_on']}"
+            )
 
         response = self.execution_engine.execute_plan(
             plan=plan,
@@ -170,6 +277,15 @@ class OrchestrationAgent:
     def show_state(self):
         self.game_state_manager.display_state()
 
+    def show_npc_state(self, npc_id: str):
+        self.npc_state_manager.display_state(npc_id)
+
+    def show_all_npc_states(self):
+        all_states = self.npc_state_manager.get_all_states()
+
+        for npc_id in all_states:
+            self.npc_state_manager.display_state(npc_id)
+
     def show_audit_log(self):
         self.game_state_manager.display_audit_log()
 
@@ -183,13 +299,19 @@ class OrchestrationAgent:
         self.memory_system.display_memory()
 
     def search_semantic_memory(self, query: str):
-        self.semantic_memory_system.display_relevant_events(query=query)
+        self.semantic_memory_system.display_relevant_events(
+            query=query
+        )
 
     def rebuild_semantic_memory(self):
         self.semantic_memory_system.rebuild_from_persistent_memory(
             self.memory_system.events
         )
-        print("\nSemantic memory has been rebuilt from persistent memory.\n")
+
+        print(
+            "\nSemantic memory has been rebuilt "
+            "from persistent memory.\n"
+        )
 
     def clear_memory(self):
         self.memory_system.clear_memory()
