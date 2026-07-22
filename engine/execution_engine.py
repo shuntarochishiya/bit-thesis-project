@@ -49,8 +49,8 @@ class ExecutionEngine:
         dialogue_agent: DialogueAgent,
         dialogue_step_agent: DialogueStepAgent,
         precondition_agent: PreconditionAgent,
-        npc_state_manager: NPCStateManager,
-        narrative_agent: NarrativeGenerationAgent
+        narrative_agent: NarrativeGenerationAgent,
+        npc_state_manager: NPCStateManager | None = None
     ):
         self.game_state_manager = game_state_manager
         self.npc_state_manager = npc_state_manager
@@ -72,151 +72,6 @@ class ExecutionEngine:
         self.dialogue_agent = dialogue_agent
         self.dialogue_step_agent = dialogue_step_agent
         self.narrative_agent = narrative_agent
-
-    @staticmethod
-    def _normalize_npc_target(target: str) -> str:
-        """Converts target aliases into NPCStateManager identifiers."""
-
-        if not target:
-            return ""
-
-        normalized_target = target.strip().lower().replace("-", "_").replace(" ", "_")
-
-        target_aliases = {
-            "barmaid": "bartender",
-            "barkeep": "bartender",
-            "vendor": "merchant",
-            "shopkeeper": "merchant",
-            "trader": "merchant",
-            "enemy": "forest_goblin",
-            "goblin": "forest_goblin",
-            "forest_goblin_enemy": "forest_goblin"
-        }
-
-        return target_aliases.get(normalized_target, normalized_target)
-
-    @staticmethod
-    def _detect_npc_event(
-        player_input: str,
-        intent: str,
-        npc_id: str
-    ) -> str | None:
-        """Maps a completed player action to an NPC relationship event."""
-
-        input_text = (player_input or "").lower()
-        normalized_intent = (intent or "").lower()
-
-        if any(phrase in input_text for phrase in (
-            "rob",
-            "steal",
-            "take his money",
-            "take her money",
-            "take their money"
-        )):
-            return "robbed"
-
-        if any(phrase in input_text for phrase in (
-            "threaten",
-            "intimidate",
-            "or else",
-            "i will hurt",
-            "i'll hurt"
-        )):
-            return "threatened"
-
-        if (
-            "combat" in normalized_intent
-            or any(phrase in input_text for phrase in (
-                "attack",
-                "hit ",
-                "strike",
-                "stab",
-                "shoot",
-                "punch",
-                "kick "
-            ))
-        ):
-            return "attacked"
-
-        if any(phrase in input_text for phrase in (
-            "insult",
-            "idiot",
-            "fool",
-            "stupid"
-        )):
-            return "insulted"
-
-        if any(phrase in input_text for phrase in (
-            "sorry",
-            "apologize",
-            "apologise",
-            "forgive me"
-        )):
-            return "apologized"
-
-        if npc_id == "merchant" and any(phrase in input_text for phrase in (
-            "buy",
-            "purchase",
-            "pay for"
-        )):
-            return "bought_goods"
-
-        if any(phrase in input_text for phrase in (
-            "help",
-            "assist",
-            "save",
-            "protect"
-        )):
-            return "helped"
-
-        return None
-
-    def _register_npc_event(
-        self,
-        player_input: str,
-        intent: str,
-        target: str,
-        action_blocked: bool
-    ) -> None:
-        """Updates NPC state once after a permitted player action."""
-
-        if action_blocked:
-            return
-
-        npc_id = self._normalize_npc_target(target)
-
-        known_npcs = {
-            "merchant",
-            "bartender",
-            "guard",
-            "traveler",
-            "forest_goblin"
-        }
-
-        if npc_id not in known_npcs:
-            return
-
-        event_type = self._detect_npc_event(
-            player_input=player_input,
-            intent=intent,
-            npc_id=npc_id
-        )
-
-        if event_type is None:
-            return
-
-        try:
-            self.npc_state_manager.apply_relationship_event(
-                npc_id=npc_id,
-                event_type=event_type
-            )
-            print(f"[NPC STATE] Applied '{event_type}' to '{npc_id}'.")
-
-        except (KeyError, ValueError) as error:
-            print(
-                f"[NPC STATE] Could not apply '{event_type}' "
-                f"to '{npc_id}': {error}"
-            )
 
     def apply_state_updates(
         self,
@@ -261,6 +116,97 @@ class ExecutionEngine:
             "state_updates": {}
         }
 
+    @staticmethod
+    def _build_exploration_movement_text(
+        player_input: str,
+        requested_location: str | None
+    ) -> str:
+        """Builds a short exploration description without calling an LLM."""
+
+        text = (player_input or "").lower()
+        location = (requested_location or "the area").lower()
+
+        if location == "old forest":
+            if "deeper" in text:
+                return "You go deeper into the forest."
+            if any(word in text for word in ("enter", "inside", "into")):
+                return "You enter the old forest."
+            return "You explore the old forest."
+
+        if location == "forest road":
+            if any(word in text for word in ("continue", "follow", "forward")):
+                return "You continue along the forest road."
+            return "You walk along the forest road."
+
+        if location == "old ruins":
+            if any(word in text for word in ("enter", "inside")):
+                return "You enter the old ruins."
+            return "You approach the old ruins."
+
+        if location == "village":
+            return "You make your way toward the village."
+
+        if location == "valley":
+            return "You continue into the valley."
+
+        if location == "riverbank":
+            return "You walk toward the riverbank."
+
+        return f"You explore {location}."
+
+    @staticmethod
+    def _build_combat_response(
+        target: str,
+        combat_context: Dict[str, Any],
+        blocked_reason: str = ""
+    ) -> str:
+        """Builds the final player-facing combat text without an LLM."""
+
+        if combat_context.get("reaction_type") == "blocked":
+            return blocked_reason or "The combat action was blocked."
+
+        target_name = {
+            "enemy": "enemy",
+            "merchant": "merchant",
+            "bartender": "bartender"
+        }.get(target, target or "target")
+
+        hit = bool(combat_context.get("hit"))
+        damage = int(combat_context.get("damage") or 0)
+        defeated = bool(combat_context.get("target_defeated"))
+        remaining_health = combat_context.get("target_health_after")
+        reaction_type = combat_context.get("reaction_type", "none")
+        retaliation_damage = int(combat_context.get("retaliation_damage") or 0)
+
+        parts: List[str] = []
+
+        if hit:
+            parts.append(f"You hit the {target_name} for {damage} damage.")
+            if defeated:
+                parts.append(f"The {target_name} is defeated.")
+            elif remaining_health is not None:
+                parts.append(
+                    f"The {target_name} has {remaining_health} health remaining."
+                )
+        else:
+            parts.append(f"You attack the {target_name}, but miss.")
+
+        if reaction_type == "counterattack":
+            parts.append(
+                f"The {target_name} retaliates and deals "
+                f"{retaliation_damage} damage to you."
+            )
+        elif reaction_type == "call_for_help":
+            parts.append("The merchant recoils and calls for help.")
+            parts.append("The merchant is now hostile and refuses to trust you.")
+        elif reaction_type == "flee":
+            parts.append("The wounded merchant panics and flees from you.")
+        elif reaction_type == "turn_tavern_hostile":
+            parts.append("The bartender becomes hostile and calls the tavern to action.")
+            parts.append("The room turns against you.")
+
+        return " ".join(parts)
+
     def execute_plan(
         self,
         plan: List[Dict[str, Any]],
@@ -270,6 +216,7 @@ class ExecutionEngine:
     ) -> str:
         completed_tasks = {}
         execution_result = "No specific game action was executed."
+        player_response: str | None = None
 
         execution_levels = self.dag_scheduler.build_execution_levels(plan)
         formatted_execution_levels = self.dag_scheduler.format_execution_levels(execution_levels)
@@ -290,7 +237,14 @@ class ExecutionEngine:
                 "damage": 0,
                 "target_defeated": False,
                 "projected_health": None,
-                "health_key": None
+                "health_key": None,
+                "target_health_before": None,
+                "target_health_after": None,
+                "attack_applied": False,
+                "reaction_type": "none",
+                "retaliation_damage": 0,
+                "player_health_after": None,
+                "reaction_applied": False
             },
             "consequence_result": {
                 "allow_action": True,
@@ -332,6 +286,7 @@ class ExecutionEngine:
                 "conflict_resolution_hint": "none",
                 "conflict_record": None,
                 "final_event": None,
+                "event_message": "",
                 "followup_event": None
             },
             "action_blocked": False
@@ -546,11 +501,21 @@ class ExecutionEngine:
                                 snapshot_id=snapshot_id
                             )
 
-                        elif step_name == "enemy_reaction":
-                            result = self.combat_step_agent.enemy_reaction(
+                        elif step_name == "calculate_target_reaction":
+                            result = self.combat_step_agent.calculate_target_reaction(
                                 game_state=game_state,
                                 target=target,
+                                hit=combat_context["hit"],
                                 target_defeated=combat_context["target_defeated"],
+                                action_blocked=execution_context["action_blocked"]
+                            )
+
+                        elif step_name == "apply_target_reaction":
+                            result = self.combat_step_agent.apply_target_reaction(
+                                game_state=game_state,
+                                target=target,
+                                reaction_type=combat_context["reaction_type"],
+                                retaliation_damage=combat_context["retaliation_damage"],
                                 action_blocked=execution_context["action_blocked"]
                             )
 
@@ -566,6 +531,16 @@ class ExecutionEngine:
 
                         if "data" in result:
                             combat_context.update(result["data"])
+
+                        if step_name == "apply_target_reaction":
+                            player_response = self._build_combat_response(
+                                target=target,
+                                combat_context=combat_context,
+                                blocked_reason=execution_context["consequence_result"].get(
+                                    "reason",
+                                    "The combat action was blocked."
+                                )
+                            )
 
                         execution_result = result["message"]
                         completed_tasks[task_id] = result
@@ -798,6 +773,25 @@ class ExecutionEngine:
                                 snapshot_id=snapshot_id
                             )
 
+                            event_context["event_message"] = result["message"]
+
+                            movement_message = self._build_exploration_movement_text(
+                                player_input=player_input,
+                                requested_location=event_context["requested_location"]
+                            )
+
+                            final_event = result.get("data", {}).get(
+                                "final_event",
+                                "nothing_special"
+                            )
+
+                            if final_event == "nothing_special":
+                                player_response = movement_message
+                            else:
+                                player_response = (
+                                    f"{movement_message} {result['message']}"
+                                ).strip()
+
                         elif step_name == "generate_followup_event":
                             result = self.event_agent.generate_followup_event(
                                 final_event=event_context["final_event"],
@@ -869,7 +863,7 @@ class ExecutionEngine:
                             player_input=player_input,
                             intent=intent,
                             target=target,
-                            system_result=execution_result,
+                            system_result=player_response or execution_result,
                             state_before=state_before_turn,
                             state_after=state_after_action
                         )
@@ -880,7 +874,7 @@ class ExecutionEngine:
                             f"Player input: {player_input}. "
                             f"Intent: {intent}. "
                             f"Target: {target}. "
-                            f"System result: {execution_result}"
+                            f"System result: {player_response or execution_result}"
                         )
 
                         self.execution_logger.set_memory_event(memory_event_for_log)
@@ -892,13 +886,6 @@ class ExecutionEngine:
                         }
 
                     elif agent_type == "narrative":
-                        self._register_npc_event(
-                            player_input=player_input,
-                            intent=intent,
-                            target=target,
-                            action_blocked=execution_context["action_blocked"]
-                        )
-
                         final_state = self.game_state_manager.get_state()
                         recent_memory = self.memory_system.retrieve_recent_events()
 
@@ -967,18 +954,13 @@ class ExecutionEngine:
 
                         return execution_result
 
-        self._register_npc_event(
-            player_input=player_input,
-            intent=intent,
-            target=target,
-            action_blocked=execution_context["action_blocked"]
-        )
-
         final_state = self.game_state_manager.get_state()
+
+        final_response = player_response or execution_result
 
         self.execution_logger.finish_turn(
             state_after=final_state,
-            final_response=execution_result
+            final_response=final_response
         )
 
-        return execution_result
+        return final_response

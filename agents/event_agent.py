@@ -430,22 +430,19 @@ class EventAgent:
         crime_level = int(game_state.get("crime_level", 0))
 
         messages = {
-            "find_footprints": "The player finds fresh footprints leading deeper into the area.",
-            "find_coin": "The player notices a small coin half-buried in the dirt.",
-            "hidden_path": "The player discovers a narrow hidden path behind thick branches.",
-            "strange_noise": "The player hears a strange sound somewhere nearby.",
-            "npc_encounter": "The player encounters a cautious traveler nearby.",
-            "traveler_in_need": "A tired traveler asks the player for help.",
+            "find_coin": "You notice a small gold coin half-buried in the dirt.",
+            "find_footprints": "You find fresh footprints leading deeper into the area.",
+            "hidden_path": "You discover a narrow hidden path behind thick branches.",
+            "strange_noise": "You hear a strange sound somewhere nearby.",
+            "npc_encounter": "You encounter a cautious traveler nearby.",
+            "traveler_in_need": "A tired traveler asks you for help.",
             "npc_returns_favor": "A familiar NPC returns to repay an old favor.",
-            "enemy_ambush": "An enemy emerges from cover and threatens the player.",
+            "enemy_ambush": "An enemy emerges from cover and threatens you.",
             "bandit_roadblock": "Bandits block the road and demand payment.",
-            "guard_patrol": "A guard patrol approaches and studies the player carefully.",
+            "guard_patrol": "A guard patrol approaches and studies you carefully.",
             "merchant_cart": "A merchant cart moves slowly along the road.",
-            "old_ruin_discovery": "The player finds old stone ruins covered by moss and dust.",
-            "nothing_special": (
-                "The player explores the area, but nothing important happens. "
-                f"Plausibility note: {plausibility_reason}"
-            ),
+            "old_ruin_discovery": "You find old stone ruins covered by moss and dust.",
+            "nothing_special": "Nothing unusual happens."
         }
 
         if final_event == "find_coin":

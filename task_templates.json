@@ -66,30 +66,30 @@
       "fallback": "safe_combat_response"
     },
     {
-      "task_id": "enemy_reaction",
+      "task_id": "calculate_target_reaction",
       "depends_on": [
         "apply_combat_result"
       ],
       "agent": "combat_step",
-      "step": "enemy_reaction",
+      "step": "calculate_target_reaction",
+      "fallback": "safe_combat_response"
+    },
+    {
+      "task_id": "apply_target_reaction",
+      "depends_on": [
+        "calculate_target_reaction"
+      ],
+      "agent": "combat_step",
+      "step": "apply_target_reaction",
       "fallback": "safe_combat_response"
     },
     {
       "task_id": "update_memory",
       "depends_on": [
-        "enemy_reaction"
+        "apply_target_reaction"
       ],
       "agent": "memory",
       "fallback": "skip_memory_update"
-    },
-    {
-      "task_id": "generate_narrative",
-      "depends_on": [
-        "enemy_reaction",
-        "update_memory"
-      ],
-      "agent": "narrative",
-      "fallback": "basic_narrative"
     }
   ],
   "persuasion_action": [
@@ -254,15 +254,6 @@
       ],
       "agent": "memory",
       "fallback": "skip_memory_update"
-    },
-    {
-      "task_id": "generate_narrative",
-      "depends_on": [
-        "generate_followup_event",
-        "update_memory"
-      ],
-      "agent": "narrative",
-      "fallback": "basic_narrative"
     }
   ],
   "dialogue_action": [
