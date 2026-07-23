@@ -409,13 +409,17 @@ class DialogueAgent:
 
         if merchant_hostile or attack_remembered:
             if asking_for_apology:
-                return self._build_result(
+                return self._build_dialogue_response(
                     success=True,
-                    message=(
-                        "The merchant listens to the apology without relaxing. "
-                        "They remember the previous violence and warn that trust "
-                        "will have to be earned through actions."
-                    ),
+                    npc_intent="consider_apology",
+                    emotion="guarded",
+                    tone="cold",
+                    topic="apology",
+                    reaction_style="cautious",
+                    current_goal=current_goal,
+                    dialogue_data=dialogue_data,
+                    response_length="short",
+                    allow_trade=False,
                     state_updates={
                         "relationship_with_merchant": min(
                             game_state.get(
@@ -425,34 +429,79 @@ class DialogueAgent:
                             100
                         )
                     },
-                    dialogue_data=dialogue_data,
-                    additional_data={
-                        "reaction_style": "cautious",
-                        "current_goal": current_goal
+                    extra={
+                        "requires_trust_recovery": True,
+                        "remembers_attack": attack_remembered
                     }
                 )
 
             if merchant_fear >= 70:
-                message = (
-                    "The merchant backs away from the player and refuses to continue "
-                    "the conversation. Fear is stronger than any desire to trade."
+                return self._build_dialogue_response(
+                    success=True,
+                    npc_intent="avoid_player",
+                    emotion="afraid",
+                    tone="nervous",
+                    topic="personal_safety",
+                    reaction_style="fearful",
+                    current_goal="stay safe",
+                    dialogue_data=dialogue_data,
+                    response_length="short",
+                    allow_trade=False,
+                    state_updates={
+                        "merchant_hostile": True,
+                        "relationship_with_merchant": max(
+                            game_state.get(
+                                "relationship_with_merchant",
+                                merchant_trust
+                            ) - 2,
+                            0
+                        )
+                    },
+                    extra={
+                        "refuses_conversation": True,
+                        "remembers_attack": attack_remembered
+                    }
                 )
 
-            elif merchant_anger >= 70 or emotion == "hostile":
-                message = (
-                    "The merchant angrily orders the player to leave and refuses "
-                    "to discuss business after the previous attack or threat."
+            if merchant_anger >= 70 or emotion in {"angry", "hostile"}:
+                return self._build_dialogue_response(
+                    success=True,
+                    npc_intent="order_player_to_leave",
+                    emotion="angry",
+                    tone="hostile",
+                    topic="previous_attack",
+                    reaction_style="hostile",
+                    current_goal="protect self and goods",
+                    dialogue_data=dialogue_data,
+                    response_length="short",
+                    allow_trade=False,
+                    state_updates={
+                        "merchant_hostile": True,
+                        "relationship_with_merchant": max(
+                            game_state.get(
+                                "relationship_with_merchant",
+                                merchant_trust
+                            ) - 2,
+                            0
+                        )
+                    },
+                    extra={
+                        "refuses_conversation": True,
+                        "remembers_attack": attack_remembered
+                    }
                 )
 
-            else:
-                message = (
-                    "The merchant refuses to talk because the player previously "
-                    "attacked, robbed or threatened them."
-                )
-
-            return self._build_result(
+            return self._build_dialogue_response(
                 success=True,
-                message=message,
+                npc_intent="refuse_trade",
+                emotion="resentful",
+                tone="cold",
+                topic="broken_trust",
+                reaction_style="hostile",
+                current_goal="protect self and goods",
+                dialogue_data=dialogue_data,
+                response_length="short",
+                allow_trade=False,
                 state_updates={
                     "merchant_hostile": True,
                     "relationship_with_merchant": max(
@@ -463,29 +512,35 @@ class DialogueAgent:
                         0
                     )
                 },
-                dialogue_data=dialogue_data,
-                additional_data={
-                    "reaction_style": "hostile",
-                    "current_goal": current_goal
+                extra={
+                    "refuses_conversation": True,
+                    "remembers_attack": attack_remembered
                 }
             )
-
         if merchant_trust >= 75:
-            if asking_for_trade:
-                message = (
-                    "The merchant greets the player as a trusted customer and "
-                    "listens carefully, appearing open to discussing prices."
-                )
 
-            else:
-                message = (
-                    "The merchant welcomes the player warmly and seems comfortable "
-                    "sharing information beyond ordinary business."
-                )
+            return self._build_dialogue_response(
 
-            return self._build_result(
                 success=True,
-                message=message,
+
+                npc_intent="welcome",
+
+                emotion="friendly",
+
+                tone="warm",
+
+                topic="trade" if asking_for_trade else "conversation",
+
+                reaction_style="friendly",
+
+                current_goal=current_goal,
+
+                dialogue_data=dialogue_data,
+
+                response_length="medium",
+
+                allow_trade=True,
+
                 state_updates={
                     "relationship_with_merchant": min(
                         game_state.get(
@@ -494,11 +549,6 @@ class DialogueAgent:
                         ) + 1,
                         100
                     )
-                },
-                dialogue_data=dialogue_data,
-                additional_data={
-                    "reaction_style": "friendly",
-                    "current_goal": current_goal
                 }
             )
 
@@ -764,42 +814,72 @@ class DialogueAgent:
             asking_for_information
             and generosity_remembered
         ):
-            return self._build_result(
+           return self._build_result(
                 success=True,
-                message=(
-                    "Remembering the player's generosity, the bartender leans closer "
-                    "and quietly offers a useful piece of local information."
-                ),
+
+                message="",
+
                 state_updates={
-                    "bartender_mood": "friendly",
-                    "relationship_with_bartender": min(
+                    "bartender_mood":"friendly",
+                    "relationship_with_bartender":min(
                         game_state.get(
                             "relationship_with_bartender",
                             bartender_trust
-                        ) + 2,
+                        )+2,
                         100
                     )
                 },
+
                 dialogue_data=dialogue_data,
+
                 additional_data={
-                    "reaction_style": "grateful",
-                    "current_goal": current_goal
+
+                    "npc_intent":"share_secret",
+
+                    "tone":"quiet",
+
+                    "emotion":"grateful",
+
+                    "topic":"local_rumors",
+
+                    "response_length":"long",
+
+                    "allow_trade":True,
+
+                    "reaction_style":"grateful",
+
+                    "current_goal":current_goal
                 }
             )
 
         if bartender_trust >= 70:
             return self._build_result(
                 success=True,
-                message=(
-                    "The bartender greets the player warmly and seems willing "
-                    "to share useful information."
-                ),
+
+                message="",
+
                 state_updates={
                     "bartender_mood": "friendly"
                 },
+
                 dialogue_data=dialogue_data,
+
                 additional_data={
+
+                    "npc_intent": "share_information",
+
+                    "tone": "warm",
+
+                    "emotion": "friendly",
+
+                    "topic": "rumors",
+
+                    "response_length": "medium",
+
+                    "allow_trade": True,
+
                     "reaction_style": "friendly",
+
                     "current_goal": current_goal
                 }
             )
@@ -840,17 +920,32 @@ class DialogueAgent:
 
         return self._build_result(
             success=True,
-            message=(
-                "The bartender wipes a wooden mug and waits to hear "
-                "what the player wants."
-            ),
+
+            message="",
+
             state_updates={
-                "bartender_mood": "neutral"
+                "bartender_mood":"neutral"
             },
+
             dialogue_data=dialogue_data,
+
             additional_data={
-                "reaction_style": "neutral",
-                "current_goal": current_goal
+
+                "npc_intent":"listen",
+
+                "tone":"neutral",
+
+                "emotion":"neutral",
+
+                "topic":"player_request",
+
+                "response_length":"short",
+
+                "allow_trade":True,
+
+                "reaction_style":"neutral",
+
+                "current_goal":current_goal
             }
         )
 
@@ -1320,10 +1415,19 @@ class DialogueAgent:
         additional_data: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Produces one consistent result format for every dialogue branch.
+        Returns structured dialogue information.
+
+        DialogueAgent no longer generates the final NPC text.
+        Instead it returns dialogue intent and context that will
+        be consumed by DialogueGeneratorAgent.
         """
+
         data = {
-            "dialogue_context": dialogue_data
+            "dialogue_context": dialogue_data,
+
+            # NEW
+            "generate_dialogue": success,
+            "npc_reply": None
         }
 
         if additional_data:
@@ -1331,8 +1435,62 @@ class DialogueAgent:
 
         return {
             "success": success,
+
+            # temporary; DialogueGeneratorAgent will overwrite it
             "message": message,
+
             "state_updates": state_updates,
+
+            "data": data
+        }
+
+
+    def _build_dialogue_response(
+        self,
+        *,
+        success: bool,
+        npc_intent: str,
+        emotion: str,
+        tone: str,
+        topic: str,
+        reaction_style: str,
+        current_goal: str,
+        dialogue_data: Dict[str, Any],
+        state_updates: Optional[Dict[str, Any]] = None,
+        response_length: str = "medium",
+        allow_trade: bool = False,
+        extra: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Returns structured dialogue information without generating
+        the final NPC response.
+        """
+
+        data = {
+            "dialogue_context": dialogue_data,
+
+            "generate_dialogue": success,
+            "npc_reply": None,
+
+            "npc_intent": npc_intent,
+            "emotion": emotion,
+            "tone": tone,
+            "topic": topic,
+            "response_length": response_length,
+
+            "reaction_style": reaction_style,
+            "current_goal": current_goal,
+
+            "allow_trade": allow_trade
+        }
+
+        if extra:
+            data.update(extra)
+
+        return {
+            "success": success,
+            "message": "",
+            "state_updates": state_updates or {},
             "data": data
         }
 
@@ -1372,6 +1530,7 @@ class DialogueAgent:
             normalized,
             normalized
         )
+
 
     @staticmethod
     def _contains_any(

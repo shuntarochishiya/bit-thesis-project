@@ -1,4 +1,5 @@
 from typing import Dict, Any, List
+import time
 
 from state.game_state_manager import GameStateManager
 from state.npc_state_manager import NPCStateManager
@@ -11,6 +12,7 @@ from engine.dag_scheduler import DAGScheduler
 from agents.combat_agent import CombatAgent
 from agents.persuasion_agent import PersuasionAgent
 from agents.dialogue_agent import DialogueAgent
+from agents.dialogue_generator_agent import DialogueGeneratorAgent
 from agents.exploration_agent import ExplorationAgent
 from agents.narrative_agent import NarrativeGenerationAgent
 from agents.tavern_agent import TavernAgent
@@ -27,8 +29,12 @@ class ExecutionEngine:
     Dynamic execution engine.
 
     It executes tasks according to the DAG created from task_templates.json.
-    Semantic memory retrieval and consequence evaluation are now executed
-    as normal DAG nodes.
+    Semantic memory retrieval and consequence evaluation are executed as
+    normal DAG nodes.
+
+    Deterministic agents may provide the final player-facing response directly.
+    NarrativeGenerationAgent is used only when no deterministic response was
+    produced by the executed plan.
     """
 
     def __init__(
@@ -50,7 +56,8 @@ class ExecutionEngine:
         dialogue_step_agent: DialogueStepAgent,
         precondition_agent: PreconditionAgent,
         narrative_agent: NarrativeGenerationAgent,
-        npc_state_manager: NPCStateManager | None = None
+        npc_state_manager: NPCStateManager | None = None,
+        dialogue_generator_agent: DialogueGeneratorAgent | None = None
     ):
         self.game_state_manager = game_state_manager
         self.npc_state_manager = npc_state_manager
@@ -72,6 +79,10 @@ class ExecutionEngine:
         self.dialogue_agent = dialogue_agent
         self.dialogue_step_agent = dialogue_step_agent
         self.narrative_agent = narrative_agent
+        self.dialogue_generator_agent = (
+            dialogue_generator_agent
+            or DialogueGeneratorAgent()
+        )
 
     def apply_state_updates(
         self,
@@ -207,6 +218,53 @@ class ExecutionEngine:
 
         return " ".join(parts)
 
+    @staticmethod
+    def _print_task_timing(
+        task_id: str,
+        agent_type: str,
+        elapsed_seconds: float
+    ) -> None:
+        """Prints the execution time of one DAG task."""
+
+        print(
+            f"[TASK TIME] "
+            f"{task_id:<35} "
+            f"{agent_type:<22} "
+            f"{elapsed_seconds:>8.3f}s"
+        )
+
+    @staticmethod
+    def _print_turn_profile(
+        turn_started: float,
+        task_timings: List[Dict[str, Any]]
+    ) -> None:
+        """Prints a summary of all task timings for the current turn."""
+
+        total_seconds = time.perf_counter() - turn_started
+
+        print("\n" + "-" * 72)
+        print("[TURN PROFILE SUMMARY]")
+
+        if task_timings:
+            sorted_timings = sorted(
+                task_timings,
+                key=lambda item: item["seconds"],
+                reverse=True
+            )
+
+            for item in sorted_timings:
+                print(
+                    f"{item['agent']:<22} "
+                    f"{item['task_id']:<35} "
+                    f"{item['seconds']:>8.3f}s"
+                )
+        else:
+            print("No DAG tasks were executed.")
+
+        print("-" * 72)
+        print(f"TOTAL TURN TIME: {total_seconds:.3f}s")
+        print("-" * 72 + "\n")
+
     def execute_plan(
         self,
         plan: List[Dict[str, Any]],
@@ -214,6 +272,16 @@ class ExecutionEngine:
         intent: str,
         target: str
     ) -> str:
+        turn_started = time.perf_counter()
+        task_timings: List[Dict[str, Any]] = []
+
+        print("\n" + "=" * 72)
+        print("[TURN PROFILE START]")
+        print(f"Input:  {player_input}")
+        print(f"Intent: {intent}")
+        print(f"Target: {target}")
+        print("=" * 72)
+
         completed_tasks = {}
         execution_result = "No specific game action was executed."
         player_response: str | None = None
@@ -297,6 +365,8 @@ class ExecutionEngine:
                 task_id = task["task_id"]
                 agent_type = task["agent"]
                 fallback_name = task.get("fallback", "generic_fallback")
+                task_started = time.perf_counter()
+                task_timing_recorded = False
 
                 self.execution_logger.add_executed_task(task_id, agent_type)
 
@@ -665,7 +735,7 @@ class ExecutionEngine:
                             )
 
                         elif step_name == "apply_dialogue_result":
-                            result = self.dialogue_step_agent.apply_dialogue_result(
+                            step_result = self.dialogue_step_agent.apply_dialogue_result(
                                 game_state=game_state,
                                 target=target,
                                 npc_attitude=dialogue_context["npc_attitude"],
@@ -680,10 +750,50 @@ class ExecutionEngine:
                             )
 
                             self.apply_state_updates(
-                                updates=result["state_updates"],
+                                updates=step_result["state_updates"],
                                 source="DialogueStepAgent",
-                                reason=result["message"],
+                                reason=step_result["message"],
                                 snapshot_id=snapshot_id
+                            )
+
+                            # DialogueStepAgent performs deterministic analysis,
+                            # while DialogueAgent creates the structured NPC
+                            # decision used by the LLM dialogue generator.
+                            decision_state = self.game_state_manager.get_state()
+
+                            dialogue_decision = self.dialogue_agent.execute(
+                                game_state=decision_state,
+                                target=target,
+                                player_input=player_input,
+                                relevant_memory=execution_context[
+                                    "semantic_memory_results"
+                                ],
+                                consequence_result=execution_context[
+                                    "consequence_result"
+                                ]
+                            )
+
+                            self.apply_state_updates(
+                                updates=dialogue_decision.get(
+                                    "state_updates",
+                                    {}
+                                ),
+                                source="DialogueAgent",
+                                reason=dialogue_decision.get(
+                                    "message",
+                                    "Structured dialogue decision"
+                                ),
+                                snapshot_id=snapshot_id
+                            )
+
+                            result = self.dialogue_generator_agent.execute(
+                                dialogue_result=dialogue_decision,
+                                game_state=self.game_state_manager.get_state()
+                            )
+
+                            player_response = result.get(
+                                "player_response",
+                                result.get("message", "")
                             )
 
                         else:
@@ -696,19 +806,44 @@ class ExecutionEngine:
                         completed_tasks[task_id] = result
 
                     elif agent_type == "dialogue":
-                        if execution_context["action_blocked"]:
-                            result = self.build_blocked_action_result(execution_context)
-                        else:
-                            result = self.dialogue_agent.execute(game_state, target=target)
+                        dialogue_decision = self.dialogue_agent.execute(
+                            game_state=game_state,
+                            target=target,
+                            player_input=player_input,
+                            relevant_memory=execution_context[
+                                "semantic_memory_results"
+                            ],
+                            consequence_result=execution_context[
+                                "consequence_result"
+                            ]
+                        )
 
                         self.apply_state_updates(
-                            updates=result["state_updates"],
+                            updates=dialogue_decision.get(
+                                "state_updates",
+                                {}
+                            ),
                             source="DialogueAgent",
-                            reason=result["message"],
+                            reason=dialogue_decision.get(
+                                "message",
+                                "Structured dialogue decision"
+                            ),
                             snapshot_id=snapshot_id
                         )
 
-                        execution_result = result["message"]
+                        result = self.dialogue_generator_agent.execute(
+                            dialogue_result=dialogue_decision,
+                            game_state=self.game_state_manager.get_state()
+                        )
+
+                        execution_result = result.get(
+                            "message",
+                            ""
+                        )
+                        player_response = result.get(
+                            "player_response",
+                            execution_result
+                        )
                         completed_tasks[task_id] = result
 
                     elif agent_type == "event_step":
@@ -835,6 +970,11 @@ class ExecutionEngine:
                         )
 
                         execution_result = result["message"]
+
+                        # ExplorationAgent is deterministic and its message is
+                        # already suitable for the player. A later event step
+                        # may replace this response with a more specific one.
+                        player_response = result["message"]
                         completed_tasks[task_id] = result
 
                     elif agent_type == "tavern":
@@ -854,6 +994,11 @@ class ExecutionEngine:
                         )
 
                         execution_result = result["message"]
+
+                        # TavernAgent handles deterministic tavern services
+                        # itself: entering/leaving, food, drinks and rooms.
+                        # Its result must not be rewritten by NarrativeAgent.
+                        player_response = result["message"]
                         completed_tasks[task_id] = result
 
                     elif agent_type == "memory":
@@ -887,6 +1032,43 @@ class ExecutionEngine:
 
                     elif agent_type == "narrative":
                         final_state = self.game_state_manager.get_state()
+
+                        # Deterministic agents already produced a complete
+                        # player-facing response. Keep the narrative node in
+                        # old DAG templates for compatibility, but bypass the
+                        # LLM call whenever such a response exists.
+                        if player_response is not None:
+                            self.execution_logger.finish_turn(
+                                state_after=final_state,
+                                final_response=player_response
+                            )
+
+                            completed_tasks[task_id] = {
+                                "success": True,
+                                "message": player_response,
+                                "state_updates": {},
+                                "narrative_bypassed": True
+                            }
+
+                            task_elapsed = time.perf_counter() - task_started
+                            task_timings.append({
+                                "task_id": task_id,
+                                "agent": agent_type,
+                                "seconds": task_elapsed
+                            })
+                            task_timing_recorded = True
+                            self._print_task_timing(
+                                task_id=task_id,
+                                agent_type=agent_type,
+                                elapsed_seconds=task_elapsed
+                            )
+                            self._print_turn_profile(
+                                turn_started=turn_started,
+                                task_timings=task_timings
+                            )
+
+                            return player_response
+
                         recent_memory = self.memory_system.retrieve_recent_events()
 
                         combined_memory = (
@@ -914,6 +1096,23 @@ class ExecutionEngine:
                         )
 
                         completed_tasks[task_id] = narrative
+
+                        task_elapsed = time.perf_counter() - task_started
+                        task_timings.append({
+                            "task_id": task_id,
+                            "agent": agent_type,
+                            "seconds": task_elapsed
+                        })
+                        task_timing_recorded = True
+                        self._print_task_timing(
+                            task_id=task_id,
+                            agent_type=agent_type,
+                            elapsed_seconds=task_elapsed
+                        )
+                        self._print_turn_profile(
+                            turn_started=turn_started,
+                            task_timings=task_timings
+                        )
 
                         return narrative
 
@@ -952,7 +1151,38 @@ class ExecutionEngine:
                             final_response=execution_result
                         )
 
+                        task_elapsed = time.perf_counter() - task_started
+                        task_timings.append({
+                            "task_id": task_id,
+                            "agent": agent_type,
+                            "seconds": task_elapsed
+                        })
+                        task_timing_recorded = True
+                        self._print_task_timing(
+                            task_id=task_id,
+                            agent_type=agent_type,
+                            elapsed_seconds=task_elapsed
+                        )
+                        self._print_turn_profile(
+                            turn_started=turn_started,
+                            task_timings=task_timings
+                        )
+
                         return execution_result
+
+                finally:
+                    if not task_timing_recorded:
+                        task_elapsed = time.perf_counter() - task_started
+                        task_timings.append({
+                            "task_id": task_id,
+                            "agent": agent_type,
+                            "seconds": task_elapsed
+                        })
+                        self._print_task_timing(
+                            task_id=task_id,
+                            agent_type=agent_type,
+                            elapsed_seconds=task_elapsed
+                        )
 
         final_state = self.game_state_manager.get_state()
 
@@ -961,6 +1191,11 @@ class ExecutionEngine:
         self.execution_logger.finish_turn(
             state_after=final_state,
             final_response=final_response
+        )
+
+        self._print_turn_profile(
+            turn_started=turn_started,
+            task_timings=task_timings
         )
 
         return final_response

@@ -388,15 +388,6 @@
       ],
       "agent": "memory",
       "fallback": "skip_memory_update"
-    },
-    {
-      "task_id": "generate_narrative",
-      "depends_on": [
-        "execute_tavern_action",
-        "update_memory"
-      ],
-      "agent": "narrative",
-      "fallback": "basic_narrative"
     }
   ],
   "general_action": [
