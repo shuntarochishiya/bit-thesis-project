@@ -36,12 +36,13 @@ class EventAgent:
         text = player_input.lower()
 
         location_keywords = {
-            "old forest": ["forest", "woods"],
-            "forest road": ["road", "path"],
-            "old ruins": ["ruins", "ruin"],
+            "old forest": ["old forest", "forest", "woods"],
+            "forest road": ["forest road", "road", "path"],
+            "old ruins": ["old ruins", "ruins", "ruin"],
             "village": ["village", "town"],
             "valley": ["valley"],
-            "riverbank": ["river", "riverbank"],
+            "riverbank": ["riverbank", "river bank", "river"],
+            "tavern": ["tavern", "inn", "pub", "alehouse"],
         }
 
         for location, keywords in location_keywords.items():
@@ -54,13 +55,18 @@ class EventAgent:
         self,
         game_state: Dict[str, Any],
         player_input: str,
-        relevant_memory: List[str]
+        relevant_memory: List[str],
+        requested_location: Optional[str] = None
     ) -> Dict[str, Any]:
         current_location = game_state.get("location", "old forest")
-        requested_location = self.detect_requested_location(
-            player_input=player_input,
-            current_location=current_location
-        )
+
+        # The intent recognizer / execution engine is the primary source
+        # of the requested destination. Text detection is only a fallback.
+        if not requested_location:
+            requested_location = self.detect_requested_location(
+                player_input=player_input,
+                current_location=current_location
+            )
 
         memory_text = self._memory_text(relevant_memory)
         world_mood = str(game_state.get("world_mood", "mysterious")).lower()
@@ -126,6 +132,12 @@ class EventAgent:
             probabilities["traveler_in_need"] += 8
             probabilities["merchant_cart"] = 0
 
+        elif requested_location == "tavern":
+            # Entering the tavern is a location transition, not an outdoor
+            # exploration roll. Tavern services/dialogue are handled elsewhere.
+            probabilities = {event: 0 for event in probabilities}
+            probabilities["nothing_special"] = 100
+
         # Memory influence
         if any(word in memory_text for word in ["goblin", "enemy", "attack", "ambush"]):
             probabilities["enemy_ambush"] += 15
@@ -171,6 +183,11 @@ class EventAgent:
             probabilities["enemy_ambush"] += 8
             probabilities["npc_encounter"] -= 5
 
+        # Do not let memory/world modifiers re-enable outdoor events in tavern.
+        if requested_location == "tavern":
+            probabilities = {event: 0 for event in probabilities}
+            probabilities["nothing_special"] = 100
+
         probabilities = {
             event: max(int(weight), 0)
             for event, weight in probabilities.items()
@@ -214,9 +231,13 @@ class EventAgent:
         memory_text = self._memory_text(relevant_memory)
 
         impossible_locations = {
-            "merchant_cart": {"old ruins", "riverbank"},
-            "bandit_roadblock": {"old ruins", "riverbank"},
-            "old_ruin_discovery": {"village"},
+            "merchant_cart": {"old ruins", "riverbank", "tavern"},
+            "bandit_roadblock": {"old ruins", "riverbank", "tavern"},
+            "old_ruin_discovery": {"village", "tavern"},
+            "enemy_ambush": {"tavern"},
+            "guard_patrol": {"tavern"},
+            "find_footprints": {"tavern"},
+            "hidden_path": {"tavern"},
         }
 
         if requested_location in impossible_locations.get(selected_event, set()):

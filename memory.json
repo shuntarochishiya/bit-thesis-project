@@ -1,204 +1,72 @@
 [
   {
-    "timestamp": "2026-07-23T09:14:43",
-    "player_input": "I ask merchant for goods",
-    "intent": "dialogue_action",
-    "target": "merchant",
-    "system_result": "The merchant listens and gives a measured response.",
-    "state_changes": {},
-    "important_state": {
-      "merchant_health": 100,
-      "merchant_hostile": false,
-      "relationship_with_merchant": 50,
-      "bartender_health": 100,
-      "bartender_hostile": false,
-      "relationship_with_bartender": 50,
-      "bartender_mood": "neutral",
-      "bartender_role": "bartender",
-      "bartender_gender": "unknown",
-      "bartender_pronouns": "they/them",
-      "tavern_reputation": 50,
-      "player_reputation": 50,
-      "enemy_health": 60,
-      "location": "old forest",
-      "world_mood": "mysterious"
-    }
-  },
-  {
-    "timestamp": "2026-07-23T09:23:52",
-    "player_input": "Hello, chef! Anything new being spotted lately?",
-    "intent": "dialogue_action",
-    "target": null,
-    "system_result": "There is no clear character to respond.",
-    "state_changes": {},
-    "important_state": {
-      "merchant_health": 100,
-      "merchant_hostile": false,
-      "relationship_with_merchant": 50,
-      "bartender_health": 100,
-      "bartender_hostile": false,
-      "relationship_with_bartender": 50,
-      "bartender_mood": "neutral",
-      "bartender_role": "bartender",
-      "bartender_gender": "unknown",
-      "bartender_pronouns": "they/them",
-      "tavern_reputation": 50,
-      "player_reputation": 50,
-      "enemy_health": 60,
-      "location": "old forest",
-      "world_mood": "mysterious"
-    }
-  },
-  {
-    "timestamp": "2026-07-23T09:40:33",
-    "player_input": "Hello, bartender!",
-    "intent": "dialogue_action",
-    "target": "bartender",
-    "system_result": "The bartender responds and waits to hear what the player wants next.",
-    "state_changes": {},
-    "important_state": {
-      "merchant_health": 100,
-      "merchant_hostile": false,
-      "relationship_with_merchant": 50,
-      "bartender_health": 100,
-      "bartender_hostile": false,
-      "relationship_with_bartender": 50,
-      "bartender_mood": "neutral",
-      "bartender_role": "bartender",
-      "bartender_gender": "unknown",
-      "bartender_pronouns": "they/them",
-      "tavern_reputation": 50,
-      "player_reputation": 50,
-      "enemy_health": 60,
-      "location": "old forest",
-      "world_mood": "mysterious"
-    }
-  },
-  {
-    "timestamp": "2026-07-23T09:41:03",
-    "player_input": "Do you have any errands for me?",
-    "intent": "dialogue_action",
-    "target": "bartender",
-    "system_result": "The bartender responds and waits to hear what the player wants next.",
-    "state_changes": {},
-    "important_state": {
-      "merchant_health": 100,
-      "merchant_hostile": false,
-      "relationship_with_merchant": 50,
-      "bartender_health": 100,
-      "bartender_hostile": false,
-      "relationship_with_bartender": 50,
-      "bartender_mood": "neutral",
-      "bartender_role": "bartender",
-      "bartender_gender": "unknown",
-      "bartender_pronouns": "they/them",
-      "tavern_reputation": 50,
-      "player_reputation": 50,
-      "enemy_health": 60,
-      "location": "old forest",
-      "world_mood": "mysterious"
-    }
-  },
-  {
-    "timestamp": "2026-07-23T09:41:43",
-    "player_input": "Talk to the bartender and ask what kind of person he wanted to become before working at the tavern.",
-    "intent": "dialogue_action",
-    "target": "bartender",
-    "system_result": "The bartender responds and waits to hear what the player wants next.",
-    "state_changes": {},
-    "important_state": {
-      "merchant_health": 100,
-      "merchant_hostile": false,
-      "relationship_with_merchant": 50,
-      "bartender_health": 100,
-      "bartender_hostile": false,
-      "relationship_with_bartender": 50,
-      "bartender_mood": "neutral",
-      "bartender_role": "bartender",
-      "bartender_gender": "unknown",
-      "bartender_pronouns": "they/them",
-      "tavern_reputation": 50,
-      "player_reputation": 50,
-      "enemy_health": 60,
-      "location": "old forest",
-      "world_mood": "mysterious"
-    }
-  },
-  {
-    "timestamp": "2026-07-23T09:56:51",
-    "player_input": "Player:",
-    "intent": "general_action",
-    "target": null,
-    "system_result": "Semantic memory retrieval completed.",
-    "state_changes": {},
-    "important_state": {
-      "merchant_health": 100,
-      "merchant_hostile": false,
-      "relationship_with_merchant": 50,
-      "bartender_health": 100,
-      "bartender_hostile": false,
-      "relationship_with_bartender": 50,
-      "bartender_mood": "neutral",
-      "bartender_role": "bartender",
-      "bartender_gender": "unknown",
-      "bartender_pronouns": "they/them",
-      "tavern_reputation": 50,
-      "player_reputation": 50,
-      "enemy_health": 60,
-      "location": "old forest",
-      "world_mood": "mysterious"
-    }
-  },
-  {
-    "timestamp": "2026-07-23T09:58:11",
-    "player_input": "Talk to the bartender and ask what kind of person he wanted to become before working at the tavern.",
-    "intent": "dialogue_action",
-    "target": "bartender",
-    "system_result": "I've never given much thought to what I wanted to be before tending bar here. But now, serving drinks and listening to tales from travelers like yourself... it suits me well enough.",
-    "state_changes": {},
-    "important_state": {
-      "merchant_health": 100,
-      "merchant_hostile": false,
-      "relationship_with_merchant": 50,
-      "bartender_health": 100,
-      "bartender_hostile": false,
-      "relationship_with_bartender": 50,
-      "bartender_mood": "neutral",
-      "bartender_role": "bartender",
-      "bartender_gender": "unknown",
-      "bartender_pronouns": "they/them",
-      "tavern_reputation": 50,
-      "player_reputation": 50,
-      "enemy_health": 60,
-      "location": "old forest",
-      "world_mood": "mysterious"
-    }
-  },
-  {
-    "timestamp": "2026-07-23T09:59:31",
-    "player_input": "I ask a bartender for a glass of a good beer",
-    "intent": "tavern_action",
-    "target": "bartender",
-    "system_result": "You order beer for 4 coins. You now have 46 coins.",
+    "timestamp": "2026-09-10T13:59:40",
+    "player_input": "I enter the tavern",
+    "intent": "exploration_action",
+    "target": "tavern",
+    "system_result": "You enter the tavern.",
     "state_changes": {
-      "gold": {
-        "before": 50,
-        "after": 46
-      },
       "location": {
         "before": "old forest",
         "after": "tavern"
       },
+      "world_danger": {
+        "before": 20,
+        "after": 19
+      },
+      "world_mood": {
+        "before": "mysterious",
+        "after": "quiet"
+      },
+      "recent_events": {
+        "before": [],
+        "after": [
+          {
+            "event": "nothing_special",
+            "conflict": "none"
+          }
+        ]
+      }
+    },
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 50,
+      "bartender_mood": "neutral",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "tavern",
+      "world_mood": "quiet"
+    }
+  },
+  {
+    "timestamp": "2026-09-10T13:59:47",
+    "player_input": "I ask for a glass of a good wine",
+    "intent": "tavern_action",
+    "target": "bartender",
+    "system_result": "You order wine for 7 coins. You now have 43 coins.",
+    "state_changes": {
       "relationship_with_bartender": {
         "before": 50,
         "after": 51
       },
+      "gold": {
+        "before": 50,
+        "after": 43
+      },
       "bartender_mood": {
         "before": "neutral",
-        "after": "warm"
+        "after": "refined"
       },
       "world_mood": {
-        "before": "mysterious",
+        "before": "quiet",
         "after": "warm"
       }
     },
@@ -209,7 +77,7 @@
       "bartender_health": 100,
       "bartender_hostile": false,
       "relationship_with_bartender": 51,
-      "bartender_mood": "warm",
+      "bartender_mood": "refined",
       "bartender_role": "bartender",
       "bartender_gender": "unknown",
       "bartender_pronouns": "they/them",
@@ -221,19 +89,24 @@
     }
   },
   {
-    "timestamp": "2026-07-23T10:07:43",
-    "player_input": "Talk to the bartender and ask what kind of person he wanted to become before working at the tavern.",
+    "timestamp": "2026-09-10T14:00:38",
+    "player_input": "I ask the bartender about recent gossips",
     "intent": "dialogue_action",
     "target": "bartender",
-    "system_result": "Before working here, I had dreams of adventure and discovery, but life has its own way of steering us. Now, I serve as a humble listener to the tales of those who still chase their dreams.",
-    "state_changes": {},
+    "system_result": "Ah, you seek the wind's whispers, eh? Well, I've heard the hallowed halls of the castle echo with strange noises these nights and rumors of feasts fit for kings. And down by the river, they say a maiden in white has been sighted late at night... but those are just stories passed around when the ale flows free.",
+    "state_changes": {
+      "bartender_mood": {
+        "before": "refined",
+        "after": "neutral"
+      }
+    },
     "important_state": {
       "merchant_health": 100,
       "merchant_hostile": false,
       "relationship_with_merchant": 50,
       "bartender_health": 100,
       "bartender_hostile": false,
-      "relationship_with_bartender": 50,
+      "relationship_with_bartender": 51,
       "bartender_mood": "neutral",
       "bartender_role": "bartender",
       "bartender_gender": "unknown",
@@ -241,16 +114,16 @@
       "tavern_reputation": 50,
       "player_reputation": 50,
       "enemy_health": 60,
-      "location": "old forest",
-      "world_mood": "mysterious"
+      "location": "tavern",
+      "world_mood": "warm"
     }
   },
   {
-    "timestamp": "2026-07-23T10:10:29",
-    "player_input": "I ask bartender about his dreams and goals in life",
+    "timestamp": "2026-09-10T14:02:02",
+    "player_input": "I ask bartender about errands I could run for him",
     "intent": "dialogue_action",
     "target": "bartender",
-    "system_result": "Dreams and goals? I'm just here to serve a drink and maybe hear a tale or two. The world beyond these walls holds many mysteries, but for now, I focus on my humble tavern.",
+    "system_result": "Aye, lad, I've heard whispers of errands that could earn you more than a tankard or two. Seems there's a missing artifact from an old temple to the east - if ya dare venture into those haunted halls. Or perhaps, someone needs help with their brew at the alchemist's den down south. But mind the guard, they're on edge these days.",
     "state_changes": {},
     "important_state": {
       "merchant_health": 100,
@@ -258,7 +131,7 @@
       "relationship_with_merchant": 50,
       "bartender_health": 100,
       "bartender_hostile": false,
-      "relationship_with_bartender": 50,
+      "relationship_with_bartender": 51,
       "bartender_mood": "neutral",
       "bartender_role": "bartender",
       "bartender_gender": "unknown",
@@ -266,8 +139,92 @@
       "tavern_reputation": 50,
       "player_reputation": 50,
       "enemy_health": 60,
-      "location": "old forest",
-      "world_mood": "mysterious"
+      "location": "tavern",
+      "world_mood": "warm"
+    }
+  },
+  {
+    "timestamp": "2026-09-10T14:02:23",
+    "player_input": "I exit the tavern",
+    "intent": "tavern_action",
+    "target": "bartender",
+    "system_result": "You leave the tavern and step outside.",
+    "state_changes": {
+      "location": {
+        "before": "tavern",
+        "after": "village"
+      },
+      "world_mood": {
+        "before": "warm",
+        "after": "neutral"
+      }
+    },
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 51,
+      "bartender_mood": "neutral",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "village",
+      "world_mood": "neutral"
+    }
+  },
+  {
+    "timestamp": "2026-09-10T14:03:21",
+    "player_input": "I ask the merchant about goods in stock",
+    "intent": "dialogue_action",
+    "target": "merchant",
+    "system_result": "Ah, traveler! Welcome to my humble stall. Let's see now, what do I have for you today? A fine selection of goods from far-off lands, though not much new since last week, I'm afraid.\" He leans back on his worn stool, eyes twinkling mischievously under his wrinkled brow. \"But if there's something specific you're after, perhaps I might be able to help...for a price, of course!",
+    "state_changes": {},
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 51,
+      "bartender_mood": "neutral",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "village",
+      "world_mood": "neutral"
+    }
+  },
+  {
+    "timestamp": "2026-09-10T14:04:22",
+    "player_input": "I ask the merchant for a discount",
+    "intent": "dialogue_action",
+    "target": "merchant",
+    "system_result": "Ah, a shrewd bargainer you are! But I'm afraid I must stick to my prices, for my stock is as precious as the jewels in the dragon's hoard. Perhaps another time, when our wits may square off over a tankard of ale?",
+    "state_changes": {},
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 51,
+      "bartender_mood": "neutral",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "village",
+      "world_mood": "neutral"
     }
   }
 ]

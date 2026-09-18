@@ -22,6 +22,7 @@ from agents.combat_step_agent import CombatStepAgent
 from agents.persuasion_step_agent import PersuasionStepAgent
 from agents.dialogue_step_agent import DialogueStepAgent
 from agents.event_agent import EventAgent
+from agents.dialogue_validator_agent import DialogueValidatorAgent
 
 
 class ExecutionEngine:
@@ -57,7 +58,8 @@ class ExecutionEngine:
         precondition_agent: PreconditionAgent,
         narrative_agent: NarrativeGenerationAgent,
         npc_state_manager: NPCStateManager | None = None,
-        dialogue_generator_agent: DialogueGeneratorAgent | None = None
+        dialogue_generator_agent: DialogueGeneratorAgent | None = None,
+        dialogue_validator_agent: DialogueValidatorAgent | None = None
     ):
         self.game_state_manager = game_state_manager
         self.npc_state_manager = npc_state_manager
@@ -82,6 +84,10 @@ class ExecutionEngine:
         self.dialogue_generator_agent = (
             dialogue_generator_agent
             or DialogueGeneratorAgent()
+        )
+        self.dialogue_validator_agent = (
+            dialogue_validator_agent
+            or DialogueValidatorAgent(debug=True)
         )
 
     def apply_state_updates(
@@ -110,6 +116,22 @@ class ExecutionEngine:
                 f"Invalid game state detected after update from {source}. "
                 f"Rolled back to snapshot {snapshot_id}."
             )
+
+    @staticmethod
+    def _context_target_after_turn(intent: str, target: str | None) -> str | None:
+        """
+        Only NPCs may remain as active targets between turns.
+
+        Exploration targets such as "tavern" are locations and must not leak
+        into active_target. Dialogue/persuasion/combat targets may persist.
+        """
+        npc_targets = {"bartender", "merchant", "enemy"}
+
+        if intent in {"dialogue_action", "persuasion_action", "combat_action", "tavern_action"}:
+            if target in npc_targets:
+                return target
+
+        return None
 
     def build_blocked_action_result(self, execution_context: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -162,6 +184,13 @@ class ExecutionEngine:
 
         if location == "riverbank":
             return "You walk toward the riverbank."
+
+        if location == "tavern":
+            if any(word in text for word in ("leave", "exit", "outside")):
+                return "You leave the tavern."
+            if any(word in text for word in ("enter", "inside", "into", "go to")):
+                return "You enter the tavern."
+            return "You are in the tavern."
 
         return f"You explore {location}."
 
@@ -340,7 +369,9 @@ class ExecutionEngine:
             },
             "event_context": {
                 "event_probabilities": {},
-                "requested_location": None,
+                # For exploration, IntentRecognitionAgent already resolved
+                # the requested destination. Preserve it through the event DAG.
+                "requested_location": target if intent == "exploration_action" else None,
                 "selected_event": None,
                 "event_plausible": True,
                 "plausibility_reason": "",
@@ -773,6 +804,21 @@ class ExecutionEngine:
                                 ]
                             )
 
+                            generated_result = self.dialogue_generator_agent.execute(
+                                dialogue_result=dialogue_decision,
+                                game_state=self.game_state_manager.get_state()
+                            )
+
+                            validated_result = self.dialogue_validator_agent.validate(
+                                generated_result=generated_result,
+                                dialogue_decision=dialogue_decision,
+                                game_state=self.game_state_manager.get_state()
+                            )
+
+                            result = validated_result
+                            player_response = validated_result["player_response"]
+                            execution_result = validated_result["message"]
+
                             self.apply_state_updates(
                                 updates=dialogue_decision.get(
                                     "state_updates",
@@ -786,15 +832,6 @@ class ExecutionEngine:
                                 snapshot_id=snapshot_id
                             )
 
-                            result = self.dialogue_generator_agent.execute(
-                                dialogue_result=dialogue_decision,
-                                game_state=self.game_state_manager.get_state()
-                            )
-
-                            player_response = result.get(
-                                "player_response",
-                                result.get("message", "")
-                            )
 
                         else:
                             raise Exception(f"Unknown dialogue step: {step_name}")
@@ -854,6 +891,7 @@ class ExecutionEngine:
                             result = self.event_agent.calculate_event_probabilities(
                                 game_state=game_state,
                                 player_input=player_input,
+                                requested_location=target,
                                 relevant_memory=execution_context["semantic_memory_results"]
                             )
 
@@ -1038,6 +1076,27 @@ class ExecutionEngine:
                         # old DAG templates for compatibility, but bypass the
                         # LLM call whenever such a response exists.
                         if player_response is not None:
+                            context_updates: Dict[str, Any] = {
+                                "active_intent": intent,
+                                "active_target": self._context_target_after_turn(intent, target),
+                            }
+
+                            if intent == "exploration_action" and target:
+                                context_updates["active_location"] = target
+                                context_updates["active_conversation"] = None
+                            elif intent in {"dialogue_action", "persuasion_action", "tavern_action"}:
+                                context_updates["active_conversation"] = (
+                                    self._context_target_after_turn(intent, target)
+                                )
+
+                            self.apply_state_updates(
+                                updates=context_updates,
+                                source="ExecutionEngine",
+                                reason="Update active interaction context",
+                                snapshot_id=snapshot_id
+                            )
+                            final_state = self.game_state_manager.get_state()
+
                             self.execution_logger.finish_turn(
                                 state_after=final_state,
                                 final_response=player_response
@@ -1183,6 +1242,27 @@ class ExecutionEngine:
                             agent_type=agent_type,
                             elapsed_seconds=task_elapsed
                         )
+
+        # Keep persistent interaction context semantically clean.
+        # Locations belong in active_location; only NPCs belong in active_target.
+        context_updates: Dict[str, Any] = {
+            "active_intent": intent,
+            "active_target": self._context_target_after_turn(intent, target),
+        }
+
+        if intent == "exploration_action" and target:
+            context_updates["active_location"] = target
+            context_updates["active_conversation"] = None
+        elif intent in {"dialogue_action", "persuasion_action", "tavern_action"}:
+            npc_target = self._context_target_after_turn(intent, target)
+            context_updates["active_conversation"] = npc_target
+
+        self.apply_state_updates(
+            updates=context_updates,
+            source="ExecutionEngine",
+            reason="Update active interaction context",
+            snapshot_id=snapshot_id
+        )
 
         final_state = self.game_state_manager.get_state()
 

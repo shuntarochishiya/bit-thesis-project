@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, Iterable, Optional
 
 
@@ -9,9 +10,10 @@ class IntentRecognitionAgent:
 
     Responsibilities:
     - classify player input into a high-level action intent;
-    - identify the most likely target;
+    - identify NPC targets separately from location targets;
     - keep tavern services separate from NPC dialogue;
-    - route persuasion involving both merchant and bartender;
+    - route explicit movement into exploration;
+    - route persuasion involving merchant, bartender and enemy;
     - avoid unnecessary LLM calls.
 
     Supported intents:
@@ -24,9 +26,9 @@ class IntentRecognitionAgent:
     """
 
     def __init__(self) -> None:
-        # ---------------------------------------------------------
+        # =========================================================
         # Combat
-        # ---------------------------------------------------------
+        # =========================================================
         self.combat_words = {
             "attack",
             "hit",
@@ -47,9 +49,9 @@ class IntentRecognitionAgent:
             "execute",
         }
 
-        # ---------------------------------------------------------
+        # =========================================================
         # Persuasion
-        # ---------------------------------------------------------
+        # =========================================================
         self.persuasion_words = {
             "persuade",
             "convince",
@@ -78,9 +80,9 @@ class IntentRecognitionAgent:
             "cooperate",
         }
 
-        # ---------------------------------------------------------
+        # =========================================================
         # Dialogue
-        # ---------------------------------------------------------
+        # =========================================================
         self.dialogue_words = {
             "talk",
             "speak",
@@ -127,9 +129,9 @@ class IntentRecognitionAgent:
             "more details",
         }
 
-        # ---------------------------------------------------------
+        # =========================================================
         # Tavern services only
-        # ---------------------------------------------------------
+        # =========================================================
         self.tavern_service_words = {
             "drink",
             "ale",
@@ -146,18 +148,16 @@ class IntentRecognitionAgent:
             "rent",
             "sleep",
             "rest",
-            "enter tavern",
-            "enter the tavern",
-            "enter inn",
-            "enter the inn",
-            "go to the tavern",
-            "go inside",
-            "walk inside",
-            "walk into the tavern",
-            "leave tavern",
-            "leave the tavern",
-            "exit tavern",
-            "exit the tavern",
+            "order a drink",
+            "order food",
+            "order a meal",
+            "rent a room",
+            "buy a drink",
+            "buy food",
+            "get a drink",
+            "get some food",
+            "have a drink",
+            "have a meal",
         }
 
         self.tavern_location_words = {
@@ -168,9 +168,9 @@ class IntentRecognitionAgent:
             "alehouse",
         }
 
-        # ---------------------------------------------------------
+        # =========================================================
         # Exploration
-        # ---------------------------------------------------------
+        # =========================================================
         self.exploration_words = {
             "explore",
             "search",
@@ -192,39 +192,104 @@ class IntentRecognitionAgent:
             "cross",
             "return",
             "continue forward",
+            "go deeper",
+            "move deeper",
+            "walk deeper",
+            "head deeper",
             "look for",
             "find a path",
             "scout",
         }
 
-        self.location_words = {
-            "forest",
-            "woods",
-            "village",
-            "town",
-            "city",
-            "road",
-            "path",
-            "river",
-            "bridge",
-            "mountain",
-            "cave",
-            "castle",
-            "ruins",
-            "market",
-            "square",
-            "gate",
-            "field",
-            "camp",
-            "harbor",
-            "dock",
-            "tavern",
-            "inn",
+        # Canonical location names are aligned with the rest of the project.
+        self.location_aliases: Dict[str, set[str]] = {
+            "old forest": {
+                "old forest",
+                "forest",
+                "woods",
+            },
+            "forest road": {
+                "forest road",
+                "road through the forest",
+                "road in the forest",
+            },
+            "old ruins": {
+                "old ruins",
+                "ruins",
+            },
+            "village": {
+                "village",
+            },
+            "valley": {
+                "valley",
+            },
+            "riverbank": {
+                "riverbank",
+                "river bank",
+            },
+            "tavern": {
+                "tavern",
+                "inn",
+                "pub",
+                "bar",
+                "alehouse",
+            },
+            "town": {
+                "town",
+            },
+            "city": {
+                "city",
+            },
+            "road": {
+                "road",
+            },
+            "path": {
+                "path",
+                "trail",
+            },
+            "river": {
+                "river",
+            },
+            "bridge": {
+                "bridge",
+            },
+            "mountain": {
+                "mountain",
+            },
+            "cave": {
+                "cave",
+            },
+            "castle": {
+                "castle",
+            },
+            "market": {
+                "market",
+            },
+            "square": {
+                "square",
+            },
+            "gate": {
+                "gate",
+            },
+            "field": {
+                "field",
+            },
+            "camp": {
+                "camp",
+            },
+            "harbor": {
+                "harbor",
+                "harbour",
+            },
+            "dock": {
+                "dock",
+                "docks",
+            },
         }
 
-        # ---------------------------------------------------------
-        # Targets
-        # ---------------------------------------------------------
+        # =========================================================
+        # NPC targets
+        # =========================================================
         self.target_aliases: Dict[str, set[str]] = {
             "enemy": {
                 "enemy",
@@ -277,35 +342,63 @@ class IntentRecognitionAgent:
             "intent": "dialogue_action",
             "target": "bartender",
             "confidence": 0.95,
-            "reason": "bartender dialogue keyword"
+            "reason": "dialogue request"
         }
         """
+
         context = context or {}
         text = self._normalize(player_input)
-        target = self.detect_target(text, context)
+
+        explicit_npc_target = self._detect_explicit_npc_target(text)
+        context_npc_target = self._context_target(context)
+
+        location_target = self._detect_location_target(text)
 
         if not text:
             return self._build_result(
                 intent="general_action",
-                target=target,
+                target=None,
                 confidence=0.2,
                 reason="empty input",
             )
 
-        # 1. Combat always has highest priority.
-        if self._contains_any(text, self.combat_words):
+        # =========================================================
+        # 1. Combat
+        # =========================================================
+        if self._contains_any(
+            text,
+            self.combat_words
+        ):
+            combat_target = (
+                explicit_npc_target
+                or context_npc_target
+                or "enemy"
+            )
+
             return self._build_result(
                 intent="combat_action",
-                target=target or self._context_target(context),
+                target=combat_target,
                 confidence=0.99,
                 reason="combat keyword",
             )
 
-        # 2. Persuasion must be checked before dialogue.
-        if self._contains_any(text, self.persuasion_words):
-            persuasion_target = target or self._context_target(context)
+        # =========================================================
+        # 2. Persuasion
+        # =========================================================
+        if self._contains_any(
+            text,
+            self.persuasion_words
+        ):
+            persuasion_target = (
+                explicit_npc_target
+                or context_npc_target
+            )
 
-            if persuasion_target in {"merchant", "bartender", "enemy"}:
+            if persuasion_target in {
+                "merchant",
+                "bartender",
+                "enemy",
+            }:
                 return self._build_result(
                     intent="persuasion_action",
                     target=persuasion_target,
@@ -320,66 +413,109 @@ class IntentRecognitionAgent:
                 reason="persuasion keyword",
             )
 
-        # 3. Explicit tavern service requests.
-        if self._is_tavern_service(text):
+        # =========================================================
+        # 3. Tavern service
+        #
+        # Service requests must be checked before generic dialogue.
+        # Otherwise phrases such as "I ask for ale" are captured by
+        # the dialogue keyword "ask" and lose the implicit bartender.
+        # =========================================================
+        if self._is_tavern_service(text, context):
             return self._build_result(
                 intent="tavern_action",
                 target="bartender",
-                confidence=0.96,
+                confidence=0.97,
                 reason="tavern service request",
             )
 
-        # 4. Explicit NPC dialogue.
-        if self._is_dialogue(text, target, context):
+        # =========================================================
+        # 4. Explicit NPC dialogue
+        # =========================================================
+        if self._is_dialogue(
+            text=text,
+            explicit_target=explicit_npc_target,
+            context=context
+        ):
+            dialogue_target = (
+                explicit_npc_target
+                or context_npc_target
+            )
+
             return self._build_result(
                 intent="dialogue_action",
-                target=target or self._context_target(context),
+                target=dialogue_target,
                 confidence=0.94,
                 reason="dialogue request",
             )
 
-        # 5. Contextual dialogue continuation.
-        if self._is_dialogue_continuation(text, context):
+        # =========================================================
+        # 5. Explicit movement / exploration
+        #
+        # Checked BEFORE tavern services so phrases such as:
+        #
+        # "I go deeper into the forest"
+        # "I leave the tavern"
+        # "I enter the ruins"
+        #
+        # are not mistaken for tavern actions.
+        # =========================================================
+        if self._is_exploration(
+            text=text,
+            location_target=location_target
+        ):
+            exploration_target = (
+                location_target
+                or self._infer_contextual_exploration_target(
+                    text=text,
+                    context=context
+                )
+            )
+
+            return self._build_result(
+                intent="exploration_action",
+                target=exploration_target,
+                confidence=0.96,
+                reason="explicit movement or exploration request",
+            )
+
+        # =========================================================
+        # 6. Dialogue continuation
+        # =========================================================
+        if self._is_dialogue_continuation(
+            text,
+            context
+        ):
             return self._build_result(
                 intent="dialogue_action",
-                target=target or self._context_target(context),
+                target=context_npc_target,
                 confidence=0.9,
                 reason="dialogue continuation",
             )
 
-        # 6. Exploration and movement.
-        if self._is_exploration(text):
+        # =========================================================
+        # 7. Tavern context fallback
+        # =========================================================
+        active_location = self._active_location(
+            context
+        )
+
+        if (
+            active_location == "tavern"
+            and explicit_npc_target == "bartender"
+        ):
             return self._build_result(
-                intent="exploration_action",
-                target=target,
-                confidence=0.9,
-                reason="movement or exploration keyword",
+                intent="dialogue_action",
+                target="bartender",
+                confidence=0.78,
+                reason="bartender interaction inside tavern",
             )
 
-        # 7. Tavern context fallback:
-        # only service commands become tavern_action.
-        # Generic interaction with the bartender becomes dialogue.
-        active_location = self._active_location(context)
-        if active_location == "tavern":
-            if target == "bartender":
-                return self._build_result(
-                    intent="dialogue_action",
-                    target="bartender",
-                    confidence=0.78,
-                    reason="bartender interaction inside tavern",
-                )
-
-            if self._contains_any(text, self.tavern_location_words):
-                return self._build_result(
-                    intent="tavern_action",
-                    target="bartender",
-                    confidence=0.7,
-                    reason="tavern context fallback",
-                )
-
+        # =========================================================
+        # 8. General fallback
+        # =========================================================
         return self._build_result(
             intent="general_action",
-            target=target,
+            target=explicit_npc_target or location_target,
             confidence=0.5,
             reason="no specialized rule matched",
         )
@@ -390,7 +526,10 @@ class IntentRecognitionAgent:
         context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Compatibility alias."""
-        return self.recognize_intent(player_input, context)
+        return self.recognize_intent(
+            player_input,
+            context
+        )
 
     def execute(
         self,
@@ -398,10 +537,13 @@ class IntentRecognitionAgent:
         context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Compatibility alias used by orchestration code."""
-        return self.recognize_intent(player_input, context)
+        return self.recognize_intent(
+            player_input,
+            context
+        )
 
     # =============================================================
-    # Target detection
+    # NPC target detection
     # =============================================================
 
     def detect_target(
@@ -409,58 +551,248 @@ class IntentRecognitionAgent:
         text: str,
         context: Optional[Dict[str, Any]] = None,
     ) -> Optional[str]:
-        normalized = self._normalize(text)
+        """
+        Compatibility method.
+
+        Explicit NPC target has priority.
+        Context target is used only when no explicit target exists.
+        """
+
+        explicit_target = self._detect_explicit_npc_target(
+            text
+        )
+
+        if explicit_target:
+            return explicit_target
+
+        return self._context_target(
+            context or {}
+        )
+
+    def _detect_explicit_npc_target(
+        self,
+        text: str,
+    ) -> Optional[str]:
+        """
+        Detect an NPC mentioned in the current player input only.
+
+        This prevents old context such as "bartender" from leaking into
+        unrelated exploration commands.
+        """
+
+        normalized = self._normalize(
+            text
+        )
 
         for canonical_target, aliases in self.target_aliases.items():
-            if self._contains_any(normalized, aliases):
+            if self._contains_any(
+                normalized,
+                aliases
+            ):
                 return canonical_target
 
-        context_target = self._context_target(context or {})
-        if context_target:
-            return context_target
+        return None
+
+    # =============================================================
+    # Location target detection
+    # =============================================================
+
+    def _detect_location_target(
+        self,
+        text: str,
+    ) -> Optional[str]:
+        """
+        Detect a location independently from NPC targets.
+
+        Examples:
+        "go deeper into the forest" -> old forest
+        "enter the old ruins" -> old ruins
+        "walk along the forest road" -> forest road
+        """
+
+        normalized = self._normalize(
+            text
+        )
+
+        aliases_with_canonical = []
+
+        for canonical_location, aliases in self.location_aliases.items():
+            for alias in aliases:
+                aliases_with_canonical.append(
+                    (
+                        canonical_location,
+                        alias
+                    )
+                )
+
+        # Longest aliases first so "forest road" wins over "forest"
+        # and "old ruins" wins over "ruins".
+        aliases_with_canonical.sort(
+            key=lambda item: len(item[1]),
+            reverse=True
+        )
+
+        for canonical_location, alias in aliases_with_canonical:
+            if self._contains_phrase(
+                normalized,
+                alias
+            ):
+                return canonical_location
 
         return None
+
+    def _infer_contextual_exploration_target(
+        self,
+        text: str,
+        context: Dict[str, Any],
+    ) -> Optional[str]:
+        """
+        Resolve movement commands that do not repeat the location.
+
+        Example:
+        Current location = old forest
+        Player = "I go deeper"
+        -> old forest
+        """
+
+        active_location = self._active_location(
+            context
+        )
+
+        if not active_location:
+            return None
+
+        normalized_location = self._canonicalize_location(
+            active_location
+        )
+
+        directional_phrases = {
+            "go deeper",
+            "move deeper",
+            "walk deeper",
+            "head deeper",
+            "continue",
+            "continue forward",
+            "go forward",
+            "move forward",
+            "walk forward",
+            "keep going",
+        }
+
+        if self._contains_any(
+            text,
+            directional_phrases
+        ):
+            return normalized_location
+
+        return None
+
+    def _canonicalize_location(
+        self,
+        value: str,
+    ) -> str:
+        """
+        Convert aliases stored in context into canonical project names.
+        """
+
+        normalized = self._normalize(
+            value
+        )
+
+        for canonical_location, aliases in self.location_aliases.items():
+            if normalized == canonical_location:
+                return canonical_location
+
+            for alias in aliases:
+                if normalized == self._normalize(alias):
+                    return canonical_location
+
+        return normalized
 
     # =============================================================
     # Intent helpers
     # =============================================================
 
-    def _is_tavern_service(self, text: str) -> bool:
-        if self._contains_any(text, self.tavern_service_words):
-            return True
+    def _is_tavern_service(
+        self,
+        text: str,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """
+        Detect requests for tavern goods/services.
 
-        # Tavern location by itself is a service/location action only when
-        # the command clearly indicates movement.
-        has_tavern_location = self._contains_any(
-            text,
-            self.tavern_location_words,
-        )
-        has_enter_or_leave = self._contains_any(
-            text,
-            {
-                "enter",
-                "go to",
-                "walk into",
-                "step into",
-                "leave",
-                "exit",
-                "go inside",
-                "go outside",
-            },
+        Inside a tavern, requests such as "I ask for a glass of good ale"
+        implicitly target the bartender even when the player does not name
+        the bartender explicitly.
+
+        Movement to/from the tavern is still handled as exploration.
+        """
+        context = context or {}
+        active_location = self._active_location(context)
+
+        service_request_phrases = {
+            "order",
+            "ask for",
+            "buy",
+            "get me",
+            "give me",
+            "bring me",
+            "can i have",
+            "could i have",
+            "i want",
+            "i'd like",
+            "i would like",
+            "have a",
+            "have some",
+            "rent",
+        }
+
+        service_object_words = {
+            "drink", "ale", "beer", "wine", "mead", "water",
+            "food", "meal", "dinner", "lunch", "bread", "stew",
+            "room", "bed",
+        }
+
+        explicit_service = self._contains_any(text, self.tavern_service_words)
+
+        # Strong service phrases can resolve the bartender implicitly,
+        # but only when a tavern service object is also mentioned.
+        phrased_service = (
+            self._contains_any(text, service_request_phrases)
+            and self._contains_any(text, service_object_words)
         )
 
-        return has_tavern_location and has_enter_or_leave
+        # Bare service nouns such as "ale" should only become tavern actions
+        # when the player is actually in the tavern.
+        if active_location == "tavern":
+            return explicit_service or phrased_service
+
+        # Outside the tavern require a clear request, rather than treating
+        # any mention of food/drink as a service action.
+        return phrased_service
 
     def _is_dialogue(
         self,
         text: str,
-        target: Optional[str],
+        explicit_target: Optional[str],
         context: Dict[str, Any],
     ) -> bool:
-        if self._contains_any(text, self.dialogue_words):
+        """
+        Detect direct NPC conversation.
+        """
+
+        if self._contains_any(
+            text,
+            self.dialogue_words
+        ):
+            # An explicit dialogue verb is sufficient.
             return True
 
-        if target in {"merchant", "bartender", "enemy"}:
+        if explicit_target in {
+            "merchant",
+            "bartender",
+            "enemy",
+        }:
             conversation_verbs = {
                 "talk",
                 "speak",
@@ -471,18 +803,35 @@ class IntentRecognitionAgent:
                 "chat",
                 "address",
             }
-            if self._contains_any(text, conversation_verbs):
+
+            if self._contains_any(
+                text,
+                conversation_verbs
+            ):
                 return True
 
-        # Questions aimed at an NPC should be treated as dialogue.
-        if target and text.endswith("?"):
-            return True
+            if text.endswith("?"):
+                return True
 
-        if target and self._looks_like_question(text):
-            return True
+            if self._looks_like_question(
+                text
+            ):
+                return True
 
-        active_target = self._context_target(context)
-        if active_target and self._looks_like_question(text):
+        active_target = self._context_target(
+            context
+        )
+
+        # A question with no explicit NPC still counts as dialogue when
+        # there is an active conversation target from the previous turn.
+        if (
+            active_target in {
+                "merchant",
+                "bartender",
+                "enemy",
+            }
+            and self._looks_like_question(text)
+        ):
             return True
 
         return False
@@ -492,7 +841,20 @@ class IntentRecognitionAgent:
         text: str,
         context: Dict[str, Any],
     ) -> bool:
-        if not self._contains_any(text, self.dialogue_continuation_phrases):
+        """
+        Detect short dialogue follow-ups.
+
+        Examples:
+        - why?
+        - really?
+        - tell me more
+        - go on
+        """
+
+        if not self._contains_any(
+            text,
+            self.dialogue_continuation_phrases
+        ):
             return False
 
         previous_intent = str(
@@ -501,41 +863,109 @@ class IntentRecognitionAgent:
             or ""
         ).lower()
 
-        active_target = self._context_target(context)
+        active_target = self._context_target(
+            context
+        )
 
         return (
-            previous_intent in {"dialogue_action", "persuasion_action"}
-            or active_target in {"merchant", "bartender", "enemy"}
+            previous_intent in {
+                "dialogue_action",
+                "persuasion_action",
+            }
+            or active_target in {
+                "merchant",
+                "bartender",
+                "enemy",
+            }
         )
 
-    def _is_exploration(self, text: str) -> bool:
-        if self._contains_any(text, self.exploration_words):
+    def _is_exploration(
+        self,
+        text: str,
+        location_target: Optional[str],
+    ) -> bool:
+        """
+        Detect world movement and exploration.
+
+        Examples:
+        - I go deeper into the forest
+        - enter the old ruins
+        - walk toward the village
+        - leave the tavern
+        - explore the cave
+        """
+
+        exploration_verbs = {
+            "explore",
+            "search",
+            "look around",
+            "investigate",
+            "inspect",
+            "travel",
+            "move",
+            "walk",
+            "go",
+            "head",
+            "leave",
+            "enter",
+            "approach",
+            "visit",
+            "follow",
+            "climb",
+            "descend",
+            "cross",
+            "return",
+            "scout",
+        }
+
+        if (
+            location_target
+            and self._contains_any(
+                text,
+                exploration_verbs
+            )
+        ):
             return True
 
-        has_location = self._contains_any(text, self.location_words)
-        has_movement = self._contains_any(
+        explicit_movement_phrases = {
+            "go deeper",
+            "move deeper",
+            "walk deeper",
+            "head deeper",
+            "continue forward",
+            "go forward",
+            "move forward",
+            "walk forward",
+            "keep going",
+        }
+
+        if self._contains_any(
+            text,
+            explicit_movement_phrases
+        ):
+            return True
+
+        if self._contains_any(
             text,
             {
-                "go",
-                "move",
-                "walk",
-                "travel",
-                "head",
-                "enter",
-                "leave",
-                "return",
-                "approach",
-                "visit",
-            },
-        )
+                "explore",
+                "look around",
+                "investigate",
+                "scout",
+            }
+        ):
+            return True
 
-        return has_location and has_movement
+        return False
 
     # =============================================================
     # Context helpers
     # =============================================================
 
-    def _active_location(self, context: Dict[str, Any]) -> Optional[str]:
+    def _active_location(
+        self,
+        context: Dict[str, Any]
+    ) -> Optional[str]:
         value = (
             context.get("active_location")
             or context.get("location")
@@ -543,17 +973,37 @@ class IntentRecognitionAgent:
         )
 
         if value is None:
-            game_state = context.get("game_state")
-            if isinstance(game_state, dict):
+            game_state = context.get(
+                "game_state"
+            )
+
+            if isinstance(
+                game_state,
+                dict
+            ):
                 value = (
                     game_state.get("active_location")
                     or game_state.get("location")
                     or game_state.get("current_location")
                 )
 
-        return str(value).lower() if value is not None else None
+        if value is None:
+            return None
 
-    def _context_target(self, context: Dict[str, Any]) -> Optional[str]:
+        return self._canonicalize_location(
+            str(value)
+        )
+
+    def _context_target(
+        self,
+        context: Dict[str, Any]
+    ) -> Optional[str]:
+        """
+        Return an active NPC target from context.
+
+        Unknown values and locations are deliberately rejected.
+        """
+
         value = (
             context.get("active_target")
             or context.get("target")
@@ -563,8 +1013,14 @@ class IntentRecognitionAgent:
         )
 
         if value is None:
-            game_state = context.get("game_state")
-            if isinstance(game_state, dict):
+            game_state = context.get(
+                "game_state"
+            )
+
+            if isinstance(
+                game_state,
+                dict
+            ):
                 value = (
                     game_state.get("active_target")
                     or game_state.get("target")
@@ -576,31 +1032,107 @@ class IntentRecognitionAgent:
         if value is None:
             return None
 
-        normalized = self._normalize(str(value))
+        normalized = self._normalize(
+            str(value)
+        )
 
         for canonical_target, aliases in self.target_aliases.items():
             if normalized == canonical_target:
                 return canonical_target
-            if normalized in aliases:
-                return canonical_target
 
-        return normalized or None
+            for alias in aliases:
+                if normalized == self._normalize(alias):
+                    return canonical_target
+
+        return None
 
     # =============================================================
     # Generic helpers
     # =============================================================
 
-    def _normalize(self, text: str) -> str:
-        return " ".join(str(text).strip().lower().split())
+    def _normalize(
+        self,
+        text: str
+    ) -> str:
+        """
+        Normalize whitespace and lowercase text.
+        """
+
+        return " ".join(
+            str(text)
+            .strip()
+            .lower()
+            .split()
+        )
+
+    def _contains_phrase(
+        self,
+        text: str,
+        phrase: str,
+    ) -> bool:
+        """
+        Match a complete word or phrase instead of an arbitrary substring.
+        """
+
+        normalized_text = self._normalize(
+            text
+        )
+
+        normalized_phrase = self._normalize(
+            phrase
+        )
+
+        if not normalized_phrase:
+            return False
+
+        pattern = (
+            r"(?<!\w)"
+            + re.escape(normalized_phrase)
+            + r"(?!\w)"
+        )
+
+        return re.search(
+            pattern,
+            normalized_text
+        ) is not None
 
     def _contains_any(
         self,
         text: str,
         candidates: Iterable[str],
     ) -> bool:
-        return any(candidate in text for candidate in candidates)
+        """
+        Match complete words or phrases.
 
-    def _looks_like_question(self, text: str) -> bool:
+        Longer candidates are checked first.
+
+        This avoids accidental substring matches from the old implementation:
+            candidate in text
+        """
+
+        ordered_candidates = sorted(
+            candidates,
+            key=len,
+            reverse=True
+        )
+
+        for candidate in ordered_candidates:
+            if self._contains_phrase(
+                text,
+                candidate
+            ):
+                return True
+
+        return False
+
+    def _looks_like_question(
+        self,
+        text: str
+    ) -> bool:
+        normalized = self._normalize(
+            text
+        )
+
         question_starters = (
             "who ",
             "what ",
@@ -621,7 +1153,13 @@ class IntentRecognitionAgent:
             "has ",
             "tell me ",
         )
-        return text.startswith(question_starters)
+
+        if normalized.endswith("?"):
+            return True
+
+        return normalized.startswith(
+            question_starters
+        )
 
     def _build_result(
         self,

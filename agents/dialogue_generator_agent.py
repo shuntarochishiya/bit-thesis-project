@@ -329,12 +329,13 @@ class DialogueGeneratorAgent:
         )
 
         return f"""
-You generate dialogue for a fantasy role-playing game.
+You generate immersive dialogue for a fantasy role-playing game.
 
 Write only the NPC's spoken reply.
 The reply must be in the first person.
 Do not write narration, action descriptions, labels, quotation marks,
-speaker names, system notes or explanations.
+speaker names, system notes, explanations, or phrases such as
+"here is what the NPC might say".
 
 NPC
 Name or role: {target}
@@ -367,20 +368,27 @@ Limited world context
 Player says
 {player_input}
 
-Rules
-1. Stay in character.
-2. Respond directly to the player's actual words.
-3. Follow the selected NPC intent, emotion, tone and reaction style.
-4. Never contradict verified memories.
-5. Do not claim that an event happened unless it appears in the memories,
-   NPC state, world context or player's current message.
-6. Do not invent inventory changes, rewards, damage, purchases,
-   completed quests or state changes.
-7. Do not reveal information the NPC could not reasonably know.
-8. If memories do not contain the requested factual information,
-   answer with uncertainty or a personal opinion instead of inventing facts.
-9. If conversation is refused, give a brief in-character refusal.
-10. {length_instruction}
+Style and roleplay
+1. Sound like a real person living in a fantasy world, not an assistant answering a question.
+2. Let the NPC's occupation, personality, mood, goals and relationship with the player shape the voice.
+3. Prefer vivid, atmospheric and characterful dialogue when the situation allows it.
+4. Natural fantasy flavor is welcome: local expressions, dry humor, superstition, suspicion,
+   warmth, hesitation, gossip, personal opinions, small anecdotes and colorful phrasing.
+5. Vary wording, sentence structure and attitude. Avoid repetitive stock phrases.
+6. Do not make every NPC sound alike. A merchant may be persuasive, a bartender may enjoy gossip,
+   a guard may be terse, and a frightened traveler may speak nervously.
+7. When the player follows up on something the NPC just mentioned, continue that subject naturally.
+   Do not ask the player to explain the topic again if the context already makes it clear.
+8. You may creatively elaborate conversational details, rumors, suspicions, requests and possible leads
+   as part of the NPC's speech, but present uncertain material as hearsay, belief, desire or suspicion
+   unless it is verified by memory or world context.
+9. Never invent completed state changes: do not claim that the player already received or lost items,
+   money, damage, rewards, purchases, completed quests, or other authoritative game-state changes
+   unless they are explicitly present in verified context.
+10. Never contradict verified memories or known world facts.
+11. Do not reveal information the NPC could not reasonably know.
+12. If conversation is refused, give a brief but characterful in-world refusal.
+13. {length_instruction}
 
 Return only the final spoken reply.
 """.strip()
@@ -435,12 +443,12 @@ Return only the final spoken reply.
             "stream": False,
             "keep_alive": "15m",
             "options": {
-                "temperature": 0.65,
-                "top_p": 0.9,
-                "repeat_penalty": 1.1,
+                "temperature": 0.85,
+                "top_p": 0.95,
+                "repeat_penalty": 1.15,
 
                 # NPC does not need to generate a long essay.
-                "num_predict": 90,
+                "num_predict": 140,
 
                 # Prevent an unnecessarily large context window.
                 "num_ctx": 2048
@@ -637,7 +645,14 @@ Return only the final spoken reply.
             "tone:",
             "player says:",
             "dialogue decision:",
-            "relevant verified memories:"
+            "relevant verified memories:",
+            "here's what the bartender might say",
+            "here is what the bartender might say",
+            "here's what the npc might say",
+            "here is what the npc might say",
+            "the bartender might say",
+            "the npc might say",
+            "a possible response is"
         ]
 
         for marker in forbidden_markers:
@@ -983,12 +998,12 @@ Return only the final spoken reply.
         normalized = response_length.lower()
 
         if normalized == "short":
-            return "Use one or two short sentences."
+            return "Use one to three natural sentences. Keep it brief only when the situation calls for it."
 
         if normalized == "long":
-            return "Use three to five concise sentences."
+            return "Use four to seven natural sentences with room for atmosphere, personality and detail."
 
-        return "Use two or three concise sentences."
+        return "Usually use three to five natural sentences, but let the situation determine the exact length."
 
     def _format_value(
         self,
