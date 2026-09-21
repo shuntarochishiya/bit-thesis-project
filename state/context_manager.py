@@ -2,12 +2,9 @@ from typing import Dict, Any, Optional
 
 
 class ContextManager:
-    """
-    Stores short-term interaction context.
+    """Short-term scene and NPC interaction context."""
 
-    This helps the system understand that the next player input may continue
-    the previous scene or conversation.
-    """
+    CONVERSATION_INTENTS = {"dialogue_action", "persuasion_action", "tavern_action"}
 
     def __init__(self):
         self.context: Dict[str, Optional[str]] = {
@@ -16,49 +13,67 @@ class ContextManager:
             "active_intent": None,
             "active_conversation": None,
             "last_player_input": None,
-            "last_system_result": None
+            "last_system_result": None,
         }
 
     def get_context(self) -> Dict[str, Optional[str]]:
         return self.context.copy()
 
-    def update_after_turn(
-        self,
-        player_input: str,
-        intent: str,
-        target: str,
-        system_result: str,
-        game_state: Dict[str, Any]
-    ):
-        self.context["active_location"] = str(game_state.get("location", "unknown"))
+    def update_after_turn(self, player_input: str, intent: str,
+                          target: Optional[str], system_result: str,
+                          game_state: Dict[str, Any]):
+        location = game_state.get("location")
+        if location not in (None, "", "unknown"):
+            self.context["active_location"] = str(location)
+
         self.context["active_intent"] = intent
         self.context["last_player_input"] = player_input
         self.context["last_system_result"] = system_result
 
-        if target != "unknown":
-            self.context["active_target"] = target
+        target_norm = self._normalize_target(target)
 
-        if target in ["bartender", "merchant", "enemy"]:
-            self.context["active_conversation"] = target
-
-        if intent == "exploration_action" and target == "environment":
+        if intent == "exploration_action":
+            self.context["active_target"] = None
             self.context["active_conversation"] = None
+            return
 
-    def resolve_target_from_context(self, target: str) -> str:
-        """
-        If the current input has no clear target, use the active conversation target.
-        """
+        if intent in self.CONVERSATION_INTENTS and target_norm:
+            self.context["active_target"] = target_norm
+            self.context["active_conversation"] = target_norm
+            return
 
-        if target != "unknown":
-            return target
+        if intent == "combat_action":
+            self.context["active_target"] = target_norm
+            self.context["active_conversation"] = None
+            return
 
-        if self.context.get("active_conversation"):
-            return str(self.context["active_conversation"])
+        self.context["active_target"] = target_norm
 
-        if self.context.get("active_target"):
-            return str(self.context["active_target"])
+    def resolve_target_from_context(self, target: Optional[str]) -> str:
+        target_norm = self._normalize_target(target)
+        if target_norm:
+            return target_norm
+
+        active_conversation = self._normalize_target(
+            self.context.get("active_conversation")
+        )
+        if active_conversation:
+            return active_conversation
+
+        active_target = self._normalize_target(self.context.get("active_target"))
+        if active_target:
+            return active_target
 
         return "unknown"
+
+    @staticmethod
+    def _normalize_target(target: Optional[str]) -> Optional[str]:
+        if target is None:
+            return None
+        value = str(target).strip()
+        if not value or value.lower() in {"unknown", "none", "environment"}:
+            return None
+        return value
 
     def display_context(self):
         print("\n--- Interaction Context ---")

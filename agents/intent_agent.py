@@ -50,6 +50,61 @@ class IntentRecognitionAgent:
         }
 
         # =========================================================
+        # Social threat / intimidation
+        # =========================================================
+        # These are threats, not completed attacks. Physical menace such as
+        # pointing or holding a weapon at an NPC must stay in the social
+        # pipeline until the player actually strikes/stabs/shoots/etc.
+        self.social_threat_words = {
+            "threaten",
+            "intimidate",
+            "menace",
+            "blackmail",
+            "hold at knifepoint",
+            "hold at gunpoint",
+            "knife to his throat",
+            "knife to her throat",
+            "knife at his throat",
+            "knife at her throat",
+            "blade to his throat",
+            "blade to her throat",
+            "blade at his throat",
+            "blade at her throat",
+            "sword to his throat",
+            "sword to her throat",
+            "sword at his throat",
+            "sword at her throat",
+            "gun to his head",
+            "gun to her head",
+            "gun at his head",
+            "gun at her head",
+            "point a knife",
+            "point the knife",
+            "point my knife",
+            "point a blade",
+            "point the blade",
+            "point my blade",
+            "point a sword",
+            "point the sword",
+            "point my sword",
+            "point a gun",
+            "point the gun",
+            "point my gun",
+            "draw a knife on",
+            "draw my knife on",
+            "pull a knife on",
+            "pull my knife on",
+            "draw a gun on",
+            "draw my gun on",
+            "pull a gun on",
+            "pull my gun on",
+            "or else",
+            "you'll regret it",
+            "you will regret it",
+            "make you regret it",
+        }
+
+        # =========================================================
         # Persuasion
         # =========================================================
         self.persuasion_words = {
@@ -360,6 +415,26 @@ class IntentRecognitionAgent:
                 target=None,
                 confidence=0.2,
                 reason="empty input",
+            )
+
+        # =========================================================
+        # 0. Social threat / intimidation
+        # =========================================================
+        if self._is_social_threat(
+            text=text,
+            explicit_target=explicit_npc_target,
+            context=context,
+        ):
+            threat_target = (
+                explicit_npc_target
+                or context_npc_target
+            )
+
+            return self._build_result(
+                intent="persuasion_action",
+                target=threat_target,
+                confidence=0.98,
+                reason="social threat or intimidation",
             )
 
         # =========================================================
@@ -712,6 +787,89 @@ class IntentRecognitionAgent:
     # =============================================================
     # Intent helpers
     # =============================================================
+
+    def _is_social_threat(
+        self,
+        text: str,
+        explicit_target: Optional[str],
+        context: Dict[str, Any],
+    ) -> bool:
+        """
+        Detect intimidation, including physical gestures with weapons.
+
+        A displayed/pointed weapon is a social threat. A completed harmful
+        action (stab, slash, punch, shoot, attack...) remains combat.
+        """
+        target = explicit_target or self._context_target(context)
+
+        if target not in {"merchant", "bartender", "enemy"}:
+            return False
+
+        # Direct intimidation vocabulary and common weapon-menace phrases.
+        if self._contains_any(text, self.social_threat_words):
+            # Explicit completed attack phrasing still wins unless the attack
+            # word is embedded in a conditional verbal threat.
+            if self._is_completed_attack(text):
+                return False
+            return True
+
+        # Flexible construction:
+        # "I pull out a knife and point at his throat"
+        weapon_words = {
+            "knife", "blade", "dagger", "sword", "gun", "pistol", "weapon"
+        }
+        menace_verbs = {
+            "point", "aim", "brandish", "draw", "pull out", "hold", "press"
+        }
+        vulnerable_targets = {
+            "throat", "neck", "head", "face", "chest"
+        }
+
+        if (
+            self._contains_any(text, weapon_words)
+            and self._contains_any(text, menace_verbs)
+            and (
+                self._contains_any(text, vulnerable_targets)
+                or explicit_target is not None
+                or self._context_target(context) is not None
+            )
+        ):
+            return not self._is_completed_attack(text)
+
+        # Conditional violence is intimidation rather than an executed attack.
+        conditional_threat_patterns = (
+            r"\b(?:i(?:'ll| will)|i am going to|i'm going to)\s+"
+            r"(?:kill|hurt|stab|shoot|cut|beat)\b.*\bif\b",
+            r"\bif\b.*\b(?:don't|do not|won't|will not)\b.*"
+            r"\b(?:kill|hurt|stab|shoot|cut|beat)\b",
+        )
+
+        return any(
+            re.search(pattern, text) is not None
+            for pattern in conditional_threat_patterns
+        )
+
+    def _is_completed_attack(
+        self,
+        text: str,
+    ) -> bool:
+        """
+        Return True only for wording that describes an executed attack.
+
+        This prevents weapon display from becoming combat merely because a
+        weapon is present in the sentence.
+        """
+        attack_patterns = (
+            r"\b(?:i\s+)?(?:attack|hit|strike|stab|slash|shoot|punch|kick|"
+            r"assault|smash|wound|execute)\b",
+            r"\b(?:i\s+)?kill\s+(?:him|her|them|the\s+\w+|merchant|"
+            r"bartender|enemy|bandit|guard)\b",
+        )
+
+        return any(
+            re.search(pattern, text) is not None
+            for pattern in attack_patterns
+        )
 
     def _is_tavern_service(
         self,

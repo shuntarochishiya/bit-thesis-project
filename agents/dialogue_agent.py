@@ -1348,16 +1348,20 @@ class DialogueAgent:
             []
         )
 
+        relevant_personal_memories = self._select_relevant_personal_memories(
+            personal_memories,
+            related_entity="player",
+            limit=5,
+        )
+
         semantic_memory_text = " ".join(
             str(item)
             for item in relevant_memory
         )
 
         personal_memory_text = " ".join(
-            str(memory.get("event", memory))
-            if isinstance(memory, dict)
-            else str(memory)
-            for memory in personal_memories
+            self._format_personal_memory(memory)
+            for memory in relevant_personal_memories
         )
 
         memory_text = (
@@ -1401,10 +1405,82 @@ class DialogueAgent:
                 "hostile"
             ),
             "personal_memories": personal_memories,
+            "relevant_personal_memories": relevant_personal_memories,
             "semantic_memories": relevant_memory,
             "memory_text": memory_text,
             "consequence_result": consequence_result
         }
+
+    @staticmethod
+    def _select_relevant_personal_memories(
+        memories: List[Any],
+        related_entity: str = "player",
+        limit: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """
+        Select high-value episodic memories for deterministic dialogue decisions.
+        This keeps the LLM prompt small and prevents low-confidence hearsay from
+        dominating directly experienced events.
+        """
+        candidates: List[Dict[str, Any]] = []
+
+        for memory in memories or []:
+            if not isinstance(memory, dict):
+                continue
+
+            entity = memory.get("related_entity")
+            if entity not in (None, "", related_entity):
+                continue
+
+            try:
+                confidence = max(0.0, min(1.0, float(memory.get("confidence", 1.0))))
+            except (TypeError, ValueError):
+                confidence = 1.0
+
+            importance = max(0, min(100, int(memory.get("importance", 50) or 50)))
+            source = str(memory.get("source", "experienced")).strip().lower()
+
+            source_weight = {
+                "experienced": 1.0,
+                "witnessed": 0.9,
+                "heard": 0.65,
+                "inferred": 0.5,
+            }.get(source, 0.5)
+
+            scored = dict(memory)
+            scored["_relevance_score"] = round(
+                importance * confidence * source_weight,
+                2,
+            )
+            candidates.append(scored)
+
+        candidates.sort(
+            key=lambda item: (
+                float(item.get("_relevance_score", 0.0)),
+                str(item.get("timestamp", "")),
+            ),
+            reverse=True,
+        )
+
+        selected = []
+        for item in candidates[:max(1, int(limit))]:
+            clean = dict(item)
+            clean.pop("_relevance_score", None)
+            selected.append(clean)
+
+        return selected
+
+    @staticmethod
+    def _format_personal_memory(memory: Dict[str, Any]) -> str:
+        event_type = str(memory.get("event_type", "interaction"))
+        summary = str(memory.get("summary", memory.get("event", "")))
+        source = str(memory.get("source", "experienced"))
+        confidence = memory.get("confidence", 1.0)
+        importance = memory.get("importance", 50)
+        return (
+            f"[{event_type}; source={source}; confidence={confidence}; "
+            f"importance={importance}] {summary}"
+        )
 
     def _build_result(
         self,

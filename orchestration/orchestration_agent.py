@@ -245,10 +245,15 @@ class OrchestrationAgent:
 
         state_after = self.game_state_manager.get_state()
 
+        context_target = self._context_target_after_turn(
+            intent=intent,
+            target=target,
+        )
+
         self.context_manager.update_after_turn(
             player_input=player_input,
             intent=intent,
-            target=target,
+            target=context_target,
             system_result=response,
             game_state=state_after,
         )
@@ -258,6 +263,22 @@ class OrchestrationAgent:
     # =============================================================
     # Context and routing helpers
     # =============================================================
+
+    @staticmethod
+    def _context_target_after_turn(
+        intent: str,
+        target: str | None,
+    ) -> str | None:
+        """Keep only interaction targets in short-term context."""
+        if intent in {
+            "dialogue_action",
+            "persuasion_action",
+            "combat_action",
+            "tavern_action",
+        }:
+            if target not in (None, "", "unknown", "environment"):
+                return target
+        return None
 
     def _build_intent_context(
         self,

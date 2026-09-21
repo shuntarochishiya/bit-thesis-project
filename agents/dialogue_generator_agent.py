@@ -33,8 +33,8 @@ class DialogueGeneratorAgent:
         self,
         model_name: str = DEFAULT_MODEL,
         ollama_url: str = DEFAULT_OLLAMA_URL,
-        timeout: int = 60,
-        max_memory_items: int = 6,
+        timeout: int = 180,
+        max_memory_items: int = 3,
         debug: bool = True
     ) -> None:
         self.model_name = model_name
@@ -317,6 +317,13 @@ class DialogueGeneratorAgent:
         )
 
         memory_text = self._format_memories(memories)
+        conversation_history = dialogue_context.get(
+            "conversation_history",
+            []
+        )
+        conversation_text = self._format_conversation_history(
+            conversation_history
+        )
         personality_text = self._format_value(personality)
         goals_text = self._format_value(goals)
 
@@ -324,73 +331,44 @@ class DialogueGeneratorAgent:
             game_state
         )
 
-        length_instruction = self._get_length_instruction(
-            response_length
-        )
-
         return f"""
-You generate immersive dialogue for a fantasy role-playing game.
+Fantasy RPG NPC dialogue.
 
-Write only the NPC's spoken reply.
-The reply must be in the first person.
-Do not write narration, action descriptions, labels, quotation marks,
-speaker names, system notes, explanations, or phrases such as
-"here is what the NPC might say".
+RULES
+- Reply only as the NPC in first person: no narration, labels, quotes, or meta-commentary.
+- Give one complete, natural, vivid fantasy reply of 3-5 sentences and finish the final sentence cleanly.
+- Keep the NPC's own voice. Use fitting humor, gossip, superstition, suspicion, warmth, hesitation, opinions or colorful phrasing when natural.
+- Vary openings, rhythm and wording; avoid generic assistant-like replies and repeated stock phrases.
+- Develop ONE main rumor, answer, or conversational thread per reply unless the player explicitly asks for several.
+- For follow-ups such as "more details", "why?" or "go on", continue the exact subject from RECENT CONVERSATION.
+- Rumors and invented conversational color are allowed, but uncertain claims must sound like hearsay, belief or suspicion.
+- Never invent completed gameplay changes, contradict verified facts, or reveal knowledge this NPC should not have.
+- If refusing, refuse briefly but in character.
 
 NPC
-Name or role: {target}
+Role: {target}
 Personality: {personality_text}
-Long-term goals: {goals_text}
+Goals: {goals_text}
+
+CURRENT STATE
 Current goal: {current_goal}
+Emotion={emotion}; tone={tone}; style={reaction_style}
+Trust={dialogue_context.get("trust", "unknown")}; fear={dialogue_context.get("fear", "unknown")}; anger={dialogue_context.get("anger", "unknown")}; stress={dialogue_context.get("stress", "unknown")}; hostile={dialogue_context.get("hostile", False)}
+Decision: intent={npc_intent}; topic={topic}; trade={allow_trade}; refuses={refuses_conversation}
 
-Current NPC state
-Emotion: {emotion}
-Tone: {tone}
-Reaction style: {reaction_style}
-Trust: {dialogue_context.get("trust", "unknown")}
-Fear: {dialogue_context.get("fear", "unknown")}
-Anger: {dialogue_context.get("anger", "unknown")}
-Stress: {dialogue_context.get("stress", "unknown")}
-Hostile: {dialogue_context.get("hostile", False)}
+RECENT CONVERSATION
+{conversation_text}
 
-Dialogue decision
-NPC intent: {npc_intent}
-Topic: {topic}
-Trading allowed: {allow_trade}
-Conversation refused: {refuses_conversation}
-
-Relevant verified memories
+RELEVANT MEMORY
 {memory_text}
 
-Limited world context
+WORLD
 {world_context}
 
-Player says
+PLAYER
 {player_input}
 
-Style and roleplay
-1. Sound like a real person living in a fantasy world, not an assistant answering a question.
-2. Let the NPC's occupation, personality, mood, goals and relationship with the player shape the voice.
-3. Prefer vivid, atmospheric and characterful dialogue when the situation allows it.
-4. Natural fantasy flavor is welcome: local expressions, dry humor, superstition, suspicion,
-   warmth, hesitation, gossip, personal opinions, small anecdotes and colorful phrasing.
-5. Vary wording, sentence structure and attitude. Avoid repetitive stock phrases.
-6. Do not make every NPC sound alike. A merchant may be persuasive, a bartender may enjoy gossip,
-   a guard may be terse, and a frightened traveler may speak nervously.
-7. When the player follows up on something the NPC just mentioned, continue that subject naturally.
-   Do not ask the player to explain the topic again if the context already makes it clear.
-8. You may creatively elaborate conversational details, rumors, suspicions, requests and possible leads
-   as part of the NPC's speech, but present uncertain material as hearsay, belief, desire or suspicion
-   unless it is verified by memory or world context.
-9. Never invent completed state changes: do not claim that the player already received or lost items,
-   money, damage, rewards, purchases, completed quests, or other authoritative game-state changes
-   unless they are explicitly present in verified context.
-10. Never contradict verified memories or known world facts.
-11. Do not reveal information the NPC could not reasonably know.
-12. If conversation is refused, give a brief but characterful in-world refusal.
-13. {length_instruction}
-
-Return only the final spoken reply.
+Return only the spoken reply.
 """.strip()
 
     def _build_world_context(
@@ -499,6 +477,9 @@ Return only the final spoken reply.
         prompt_tokens = int(
             result.get("prompt_eval_count") or 0
         )
+        cached_prompt_tokens = int(
+            result.get("prompt_eval_cached_count") or 0
+        )
         generated_tokens = int(
             result.get("eval_count") or 0
         )
@@ -517,6 +498,7 @@ Return only the final spoken reply.
             print(f"Ollama total:        {total_seconds:.3f}s")
             print(f"HTTP request total:  {request_seconds:.3f}s")
             print(f"Prompt tokens:       {prompt_tokens}")
+            print(f"Cached prompt tokens:{cached_prompt_tokens:>8}")
             print(f"Generated tokens:    {generated_tokens}")
             print(f"Generation speed:    {tokens_per_second} tokens/s")
             print("[/OLLAMA PROFILE]\n")
@@ -574,6 +556,37 @@ Return only the final spoken reply.
                 break
 
         return unique_memories
+
+    @staticmethod
+    def _format_conversation_history(
+        history: Any
+    ) -> str:
+        """
+        Format short NPC-specific working memory separately from semantic
+        memory. This is intentionally chronological and explicit about
+        speakers so follow-up references remain resolvable.
+        """
+        if not isinstance(history, list) or not history:
+            return "- No previous turns with this NPC in the current conversation."
+
+        lines: List[str] = []
+
+        for turn in history[-2:]:
+            if not isinstance(turn, dict):
+                continue
+
+            player_text = str(turn.get("player") or "").strip()
+            npc_text = str(turn.get("npc") or "").strip()
+
+            if player_text:
+                lines.append(f"Player: {player_text}")
+            if npc_text:
+                lines.append(f"NPC: {npc_text}")
+
+        if not lines:
+            return "- No previous turns with this NPC in the current conversation."
+
+        return "\n".join(lines)
 
     def _format_memory_item(
         self,
@@ -998,12 +1011,12 @@ Return only the final spoken reply.
         normalized = response_length.lower()
 
         if normalized == "short":
-            return "Use one to three natural sentences. Keep it brief only when the situation calls for it."
+            return "Use about three natural sentences; stay vivid and in character."
 
         if normalized == "long":
-            return "Use four to seven natural sentences with room for atmosphere, personality and detail."
+            return "Use four to five natural sentences with atmosphere, personality and detail."
 
-        return "Usually use three to five natural sentences, but let the situation determine the exact length."
+        return "Use three to five natural sentences with personality and useful detail."
 
     def _format_value(
         self,

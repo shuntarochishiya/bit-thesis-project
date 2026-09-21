@@ -133,6 +133,152 @@ class ExecutionEngine:
 
         return None
 
+    def _attach_working_dialogue_memory(
+        self,
+        dialogue_decision: Dict[str, Any],
+        target: str | None,
+        limit: int = 3,
+    ) -> Dict[str, Any]:
+        """
+        Attach recent NPC-specific conversation turns to the structured
+        dialogue decision before it reaches DialogueGeneratorAgent.
+        """
+        if not isinstance(dialogue_decision, dict):
+            return dialogue_decision
+
+        history = self.memory_system.retrieve_dialogue_history(
+            target=target,
+            limit=limit,
+        )
+
+        data = dialogue_decision.setdefault("data", {})
+        if not isinstance(data, dict):
+            data = {}
+            dialogue_decision["data"] = data
+
+        dialogue_context = data.setdefault("dialogue_context", {})
+        if not isinstance(dialogue_context, dict):
+            dialogue_context = {}
+            data["dialogue_context"] = dialogue_context
+
+        dialogue_context["conversation_history"] = history
+        return dialogue_decision
+
+    def _retrieve_npc_episodic_memory(
+        self,
+        target: str | None,
+        limit: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve NPC-specific episodic memories about the player.
+
+        These records are personal NPC knowledge, not authoritative world facts.
+        """
+        if self.npc_state_manager is None or not target:
+            return []
+
+        try:
+            return self.npc_state_manager.retrieve_memories(
+                npc_id=target,
+                related_entity="player",
+                limit=limit,
+                min_importance=0,
+                min_confidence=0.0,
+            )
+        except TypeError:
+            # Backward compatibility with the older NPCStateManager signature.
+            return self.npc_state_manager.retrieve_memories(
+                npc_id=target,
+                related_entity="player",
+                limit=limit,
+            )
+        except Exception:
+            return []
+
+    def _build_npc_social_response(
+        self,
+        target: str,
+        player_input: str,
+        execution_context: Dict[str, Any],
+        deterministic_result: Dict[str, Any],
+        snapshot_id: int,
+    ) -> str:
+        """
+        Generate an NPC reply for persuasion/intimidation through the normal
+        DialogueAgent -> DialogueGeneratorAgent -> DialogueValidatorAgent path.
+
+        NarrativeGenerationAgent must not invent locations or scene details for
+        NPC social interactions.
+        """
+        episodic_memories = self._retrieve_npc_episodic_memory(target, limit=5)
+
+        relevant_memory: List[Any] = list(
+            execution_context.get("semantic_memory_results", [])
+        )
+        relevant_memory.extend(episodic_memories)
+
+        outcome_note = deterministic_result.get("message", "")
+        if outcome_note:
+            relevant_memory.append(
+                f"Deterministic social-action outcome: {outcome_note}"
+            )
+
+        social_consequence = dict(
+            execution_context.get("consequence_result", {})
+        )
+        social_consequence["social_action_result"] = deterministic_result.get(
+            "data",
+            {},
+        )
+        social_consequence["system_note"] = outcome_note
+
+        dialogue_decision = self.dialogue_agent.execute(
+            game_state=self.game_state_manager.get_state(),
+            target=target,
+            player_input=player_input,
+            relevant_memory=relevant_memory,
+            consequence_result=social_consequence,
+        )
+
+        dialogue_decision = self._attach_working_dialogue_memory(
+            dialogue_decision=dialogue_decision,
+            target=target,
+        )
+
+        # Explicitly expose episodic memory to the generator context as well.
+        data = dialogue_decision.setdefault("data", {})
+        if isinstance(data, dict):
+            dialogue_context = data.setdefault("dialogue_context", {})
+            if isinstance(dialogue_context, dict):
+                dialogue_context["episodic_memories"] = episodic_memories
+                dialogue_context["social_action_outcome"] = outcome_note
+
+        generated_result = self.dialogue_generator_agent.execute(
+            dialogue_result=dialogue_decision,
+            game_state=self.game_state_manager.get_state(),
+        )
+
+        validated_result = self.dialogue_validator_agent.validate(
+            generated_result=generated_result,
+            dialogue_decision=dialogue_decision,
+            game_state=self.game_state_manager.get_state(),
+        )
+
+        self.apply_state_updates(
+            updates=dialogue_decision.get("state_updates", {}),
+            source="DialogueAgent",
+            reason=dialogue_decision.get(
+                "message",
+                "Structured NPC social response",
+            ),
+            snapshot_id=snapshot_id,
+        )
+
+        return validated_result.get(
+            "player_response",
+            validated_result.get("message", outcome_note),
+        )
+
     def build_blocked_action_result(self, execution_context: Dict[str, Any]) -> Dict[str, Any]:
         """
         Creates a standard result when ConsequenceAgent blocks an action.
@@ -357,7 +503,12 @@ class ExecutionEngine:
                 "reputation_modifier": 0,
                 "persuasion_chance": 0,
                 "roll": None,
-                "persuasion_success": False
+                "persuasion_success": False,
+                "social_action": "persuasion",
+                "relationship_event": None,
+                "related_entity": "player",
+                "memory_source": "experienced",
+                "memory_confidence": 1.0
             },
             "dialogue_context": {
                 "npc_attitude": "neutral",
@@ -710,6 +861,51 @@ class ExecutionEngine:
                                 snapshot_id=snapshot_id
                             )
 
+                            result_data = result.get("data", {})
+                            relationship_event = result_data.get(
+                                "relationship_event"
+                            )
+
+                            # Persist meaningful social events in the NPC's
+                            # personal episodic memory. The deterministic
+                            # relationship table also updates trust/fear/anger/
+                            # stress in NPCStateManager.
+                            if (
+                                relationship_event
+                                and self.npc_state_manager is not None
+                                and target
+                            ):
+                                self.npc_state_manager.apply_relationship_event(
+                                    npc_id=target,
+                                    event_type=relationship_event,
+                                    related_entity=result_data.get(
+                                        "related_entity",
+                                        "player",
+                                    ),
+                                    source=result_data.get(
+                                        "memory_source",
+                                        "experienced",
+                                    ),
+                                    confidence=float(
+                                        result_data.get(
+                                            "memory_confidence",
+                                            1.0,
+                                        )
+                                    ),
+                                )
+
+                            # Persuasion/intimidation is an NPC social
+                            # interaction. Produce speech with the same dialogue
+                            # pipeline used by dialogue_action instead of the
+                            # legacy NarrativeGenerationAgent.
+                            player_response = self._build_npc_social_response(
+                                target=target,
+                                player_input=player_input,
+                                execution_context=execution_context,
+                                deterministic_result=result,
+                                snapshot_id=snapshot_id,
+                            )
+
                         else:
                             raise Exception(f"Unknown persuasion step: {step_name}")
 
@@ -792,16 +988,29 @@ class ExecutionEngine:
                             # decision used by the LLM dialogue generator.
                             decision_state = self.game_state_manager.get_state()
 
+                            dialogue_relevant_memory: List[Any] = list(
+                                execution_context["semantic_memory_results"]
+                            )
+                            dialogue_relevant_memory.extend(
+                                self._retrieve_npc_episodic_memory(
+                                    target=target,
+                                    limit=5,
+                                )
+                            )
+
                             dialogue_decision = self.dialogue_agent.execute(
                                 game_state=decision_state,
                                 target=target,
                                 player_input=player_input,
-                                relevant_memory=execution_context[
-                                    "semantic_memory_results"
-                                ],
+                                relevant_memory=dialogue_relevant_memory,
                                 consequence_result=execution_context[
                                     "consequence_result"
                                 ]
+                            )
+
+                            dialogue_decision = self._attach_working_dialogue_memory(
+                                dialogue_decision=dialogue_decision,
+                                target=target,
                             )
 
                             generated_result = self.dialogue_generator_agent.execute(
@@ -843,16 +1052,29 @@ class ExecutionEngine:
                         completed_tasks[task_id] = result
 
                     elif agent_type == "dialogue":
+                        dialogue_relevant_memory: List[Any] = list(
+                            execution_context["semantic_memory_results"]
+                        )
+                        dialogue_relevant_memory.extend(
+                            self._retrieve_npc_episodic_memory(
+                                target=target,
+                                limit=5,
+                            )
+                        )
+
                         dialogue_decision = self.dialogue_agent.execute(
                             game_state=game_state,
                             target=target,
                             player_input=player_input,
-                            relevant_memory=execution_context[
-                                "semantic_memory_results"
-                            ],
+                            relevant_memory=dialogue_relevant_memory,
                             consequence_result=execution_context[
                                 "consequence_result"
                             ]
+                        )
+
+                        dialogue_decision = self._attach_working_dialogue_memory(
+                            dialogue_decision=dialogue_decision,
+                            target=target,
                         )
 
                         self.apply_state_updates(

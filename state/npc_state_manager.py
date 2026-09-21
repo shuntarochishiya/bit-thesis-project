@@ -1,5 +1,6 @@
 import copy
 from datetime import datetime
+from uuid import uuid4
 from typing import Any, Dict, List, Optional
 
 from state.npc_profiles import NPCProfiles
@@ -164,61 +165,171 @@ class NPCStateManager:
         importance: int = 50,
         emotional_tag: str = "neutral",
         related_entity: Optional[str] = None,
-        max_memories: int = 20
-    ):
+        max_memories: int = 20,
+        event_type: str = "interaction",
+        participants: Optional[List[str]] = None,
+        emotional_impact: Optional[Dict[str, int]] = None,
+        source: str = "experienced",
+        confidence: float = 1.0,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Store one NPC-specific episodic memory.
+
+        The original parameters remain valid for backward compatibility.
+        """
+        npc_id = NPCProfiles.normalize_npc_id(npc_id)
         state = self.get_state(npc_id)
         memories = list(state["personal_memory"])
-        memories.append({
+
+        source_norm = str(source or "experienced").strip().lower()
+        if source_norm not in {"experienced", "witnessed", "heard", "inferred"}:
+            source_norm = "experienced"
+
+        try:
+            confidence_value = max(0.0, min(1.0, float(confidence)))
+        except (TypeError, ValueError):
+            confidence_value = 1.0
+
+        impact = emotional_impact or {}
+        normalized_impact = {
+            "trust": int(impact.get("trust", 0)),
+            "stress": int(impact.get("stress", 0)),
+            "fear": int(impact.get("fear", 0)),
+            "anger": int(impact.get("anger", 0)),
+        }
+
+        participant_list: List[str] = []
+        for participant in participants or []:
+            value = str(participant).strip()
+            if value and value not in participant_list:
+                participant_list.append(value)
+
+        if npc_id not in participant_list:
+            participant_list.append(npc_id)
+        if related_entity and related_entity not in participant_list:
+            participant_list.append(related_entity)
+
+        memory = {
+            "id": f"evt_{uuid4().hex[:12]}",
             "timestamp": datetime.now().isoformat(timespec="seconds"),
-            "event": event,
+            "event": event,          # backward-compatible field
+            "summary": event,
+            "event_type": str(event_type or "interaction").strip().lower(),
+            "participants": participant_list,
+            "related_entity": related_entity,
             "importance": self._clamp(importance),
             "emotional_tag": emotional_tag,
-            "related_entity": related_entity,
-        })
+            "emotional_impact": normalized_impact,
+            "source": source_norm,
+            "confidence": confidence_value,
+            "metadata": copy.deepcopy(metadata or {}),
+        }
+
+        memories.append(memory)
         memories = sorted(
             memories,
-            key=lambda item: item.get("importance", 0),
-            reverse=True
+            key=lambda item: (
+                int(item.get("importance", 0)),
+                str(item.get("timestamp", "")),
+            ),
+            reverse=True,
         )[:max_memories]
+
         self.update_state(
             npc_id,
             {"personal_memory": memories, "last_interaction": event},
             "NPCStateManager",
-            "NPC memory updated"
+            "NPC episodic memory updated",
         )
+        return copy.deepcopy(memory)
 
     def retrieve_memories(
         self,
         npc_id: str,
         related_entity: Optional[str] = None,
         emotional_tag: Optional[str] = None,
-        limit: int = 5
+        limit: int = 5,
+        event_type: Optional[str] = None,
+        source: Optional[str] = None,
+        min_importance: int = 0,
+        min_confidence: float = 0.0,
     ) -> List[Dict[str, Any]]:
+        """Retrieve personal episodic memories for one NPC."""
         memories = self.get_state(npc_id)["personal_memory"]
+
         if related_entity is not None:
             memories = [
-                memory for memory in memories
-                if memory.get("related_entity") == related_entity
+                m for m in memories
+                if m.get("related_entity") == related_entity
             ]
+
         if emotional_tag is not None:
             memories = [
-                memory for memory in memories
-                if memory.get("emotional_tag") == emotional_tag
+                m for m in memories
+                if m.get("emotional_tag") == emotional_tag
             ]
+
+        if event_type is not None:
+            wanted = str(event_type).strip().lower()
+            memories = [
+                m for m in memories
+                if str(m.get("event_type") or "").strip().lower() == wanted
+            ]
+
+        if source is not None:
+            wanted = str(source).strip().lower()
+            memories = [
+                m for m in memories
+                if str(m.get("source") or "").strip().lower() == wanted
+            ]
+
+        min_importance_value = self._clamp(min_importance)
+        try:
+            min_confidence_value = max(0.0, min(1.0, float(min_confidence)))
+        except (TypeError, ValueError):
+            min_confidence_value = 0.0
+
+        memories = [
+            m for m in memories
+            if int(m.get("importance", 0)) >= min_importance_value
+            and float(m.get("confidence", 1.0)) >= min_confidence_value
+        ]
+
         return copy.deepcopy(
             sorted(
                 memories,
-                key=lambda item: item.get("importance", 0),
-                reverse=True
-            )[:limit]
+                key=lambda m: (
+                    int(m.get("importance", 0)),
+                    str(m.get("timestamp", "")),
+                ),
+                reverse=True,
+            )[:max(1, int(limit))]
         )
+
+    def get_memory_by_id(
+        self,
+        npc_id: str,
+        memory_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Return one personal episodic memory by stable ID."""
+        for memory in self.get_state(npc_id)["personal_memory"]:
+            if memory.get("id") == memory_id:
+                return copy.deepcopy(memory)
+        return None
 
     def apply_relationship_event(
         self,
         npc_id: str,
         event_type: str,
-        related_entity: str = "player"
+        related_entity: str = "player",
+        source: str = "experienced",
+        confidence: float = 1.0,
     ):
+        """
+        Apply deterministic relationship effects and store the same event
+        as structured episodic memory.
+        """
         effects = {
             "helped": (15, -10, -5, -10, "grateful", False),
             "bought_goods": (5, -2, 0, -2, None, None),
@@ -230,35 +341,63 @@ class NPCStateManager:
             "robbed": (-50, 40, 35, 45, "hostile", True),
             "apologized": (8, -8, -5, -10, None, None),
         }
+
         if event_type not in effects:
             raise ValueError(f"Unknown relationship event: {event_type}")
 
         state = self.get_state(npc_id)
         trust, stress, fear, anger, emotion, hostile = effects[event_type]
+
+        emotional_impact = {
+            "trust": trust,
+            "stress": stress,
+            "fear": fear,
+            "anger": anger,
+        }
+
         updates = {
             "trust": state["trust"] + trust,
             "stress": state["stress"] + stress,
             "fear": state["fear"] + fear,
             "anger": state["anger"] + anger,
         }
+
         if hostile is not None:
             updates["hostile"] = hostile
+
         updates["emotion"] = emotion or self.infer_emotion({**state, **updates})
 
         self.update_state(
             npc_id,
             updates,
             "NPCStateManager",
-            f"Relationship event: {event_type}"
+            f"Relationship event: {event_type}",
         )
 
-        importance = 80 if event_type in {"attacked", "robbed"} else 55
-        self.add_memory(
-            npc_id,
-            f"{related_entity} {event_type} this NPC.",
-            importance,
-            updates["emotion"],
-            related_entity
+        importance = {
+            "helped": 65,
+            "bought_goods": 35,
+            "bought_drink": 30,
+            "left_tip": 50,
+            "insulted": 60,
+            "threatened": 80,
+            "attacked": 95,
+            "robbed": 95,
+            "apologized": 55,
+        }.get(event_type, 55)
+
+        return self.add_memory(
+            npc_id=npc_id,
+            event=f"{related_entity} {event_type} this NPC.",
+            importance=importance,
+            emotional_tag=updates["emotion"],
+            related_entity=related_entity,
+            event_type=event_type,
+            participants=[related_entity, NPCProfiles.normalize_npc_id(npc_id)],
+            emotional_impact=emotional_impact,
+            source=source,
+            confidence=confidence,
+            metadata={"relationship_event": True},
         )
 
     def build_simulation_context(self, npc_id: str) -> Dict[str, Any]:

@@ -29,7 +29,8 @@ class DialogueStepAgent:
                 }
             }
 
-        memory_text = " ".join(relevant_memory).lower()
+        memory_text = self._memory_text(relevant_memory)
+        episodic_signal = self._analyze_episodic_memory(relevant_memory)
 
         npc_attitude = "neutral"
         attitude_modifier = 0
@@ -83,17 +84,34 @@ class DialogueStepAgent:
             npc_attitude = "unknown"
             attitude_modifier = 0
 
-        if "attack" in memory_text or "hostile" in memory_text or "violence" in memory_text:
-            attitude_modifier -= 20
+        # Structured episodic memory has priority over loose keyword matching.
+        attitude_modifier += episodic_signal["attitude_modifier"]
 
+        if episodic_signal["strong_negative"]:
             if npc_attitude not in ["defeated", "hostile"]:
-                npc_attitude = "distrustful"
+                npc_attitude = (
+                    "fearful"
+                    if episodic_signal["fear_score"] > episodic_signal["anger_score"]
+                    else "distrustful"
+                )
 
-        if "friendly" in memory_text or "helped" in memory_text or "generous" in memory_text:
-            attitude_modifier += 10
+        elif episodic_signal["strong_positive"] and npc_attitude == "neutral":
+            npc_attitude = "friendly"
 
-            if npc_attitude == "neutral":
-                npc_attitude = "friendly"
+        # Legacy string memories remain supported, but structured episodic
+        # records are not counted a second time here.
+        if not episodic_signal["has_structured_memory"]:
+            if "attack" in memory_text or "hostile" in memory_text or "violence" in memory_text:
+                attitude_modifier -= 20
+
+                if npc_attitude not in ["defeated", "hostile"]:
+                    npc_attitude = "distrustful"
+
+            if "friendly" in memory_text or "helped" in memory_text or "generous" in memory_text:
+                attitude_modifier += 10
+
+                if npc_attitude == "neutral":
+                    npc_attitude = "friendly"
 
         return {
             "success": True,
@@ -106,7 +124,8 @@ class DialogueStepAgent:
             "state_updates": {},
             "data": {
                 "npc_attitude": npc_attitude,
-                "attitude_modifier": attitude_modifier
+                "attitude_modifier": attitude_modifier,
+                "episodic_memory_signal": episodic_signal
             }
         }
 
@@ -239,6 +258,79 @@ class DialogueStepAgent:
             "data": {
                 "dialogue_strategy": dialogue_strategy
             }
+        }
+
+    @staticmethod
+    def _memory_text(memories: List[Any]) -> str:
+        parts: List[str] = []
+        for memory in memories or []:
+            if isinstance(memory, dict):
+                parts.extend([
+                    str(memory.get("event_type", "")),
+                    str(memory.get("summary", memory.get("event", ""))),
+                    str(memory.get("emotional_tag", "")),
+                ])
+            else:
+                parts.append(str(memory))
+        return " ".join(parts).lower()
+
+    @staticmethod
+    def _analyze_episodic_memory(memories: List[Any]) -> Dict[str, Any]:
+        """
+        Convert structured NPC memories into a deterministic attitude signal.
+        Only sufficiently confident memories influence the decision strongly.
+        """
+        negative_types = {"insulted", "threatened", "attacked", "robbed"}
+        positive_types = {"helped", "bought_goods", "bought_drink", "left_tip", "apologized"}
+
+        modifier = 0
+        fear_score = 0
+        anger_score = 0
+        strongest_event = None
+        strongest_weight = -1.0
+        has_structured = False
+
+        for memory in memories or []:
+            if not isinstance(memory, dict):
+                continue
+
+            has_structured = True
+            event_type = str(memory.get("event_type", "")).strip().lower()
+            importance = max(0, min(100, int(memory.get("importance", 50) or 50)))
+            try:
+                confidence = max(0.0, min(1.0, float(memory.get("confidence", 1.0))))
+            except (TypeError, ValueError):
+                confidence = 1.0
+
+            weight = (importance / 100.0) * confidence
+            impact = memory.get("emotional_impact") or {}
+
+            if event_type in negative_types:
+                modifier -= round(25 * weight)
+            elif event_type in positive_types:
+                modifier += round(15 * weight)
+
+            fear_score += max(0, int(impact.get("fear", 0) or 0)) * weight
+            anger_score += max(0, int(impact.get("anger", 0) or 0)) * weight
+
+            if weight > strongest_weight:
+                strongest_weight = weight
+                strongest_event = {
+                    "event_type": event_type or "interaction",
+                    "summary": memory.get("summary", memory.get("event", "")),
+                    "importance": importance,
+                    "source": memory.get("source", "experienced"),
+                    "confidence": confidence,
+                }
+
+        return {
+            "has_structured_memory": has_structured,
+            "attitude_modifier": modifier,
+            "fear_score": round(fear_score, 2),
+            "anger_score": round(anger_score, 2),
+            "strong_negative": modifier <= -12,
+            "strong_positive": modifier >= 8,
+            "strongest_event": strongest_event,
         }
 
     def apply_dialogue_result(
