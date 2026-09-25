@@ -1253,6 +1253,32 @@ class ExecutionEngine:
                             snapshot_id=snapshot_id
                         )
 
+                        # A successful tavern transaction may also be a meaningful
+                        # NPC relationship event. Record it only AFTER the
+                        # authoritative gameplay transaction succeeded.
+                        result_data = result.get("data", {})
+                        relationship_event = result_data.get("relationship_event")
+
+                        if (
+                            result.get("success")
+                            and relationship_event
+                            and self.npc_state_manager is not None
+                            and target
+                        ):
+                            self.npc_state_manager.apply_relationship_event(
+                                npc_id=target,
+                                event_type=relationship_event,
+                                related_entity=result_data.get(
+                                    "related_entity", "player"
+                                ),
+                                source=result_data.get(
+                                    "memory_source", "experienced"
+                                ),
+                                confidence=float(
+                                    result_data.get("memory_confidence", 1.0)
+                                ),
+                            )
+
                         execution_result = result["message"]
 
                         # TavernAgent handles deterministic tavern services
@@ -1501,3 +1527,4 @@ class ExecutionEngine:
         )
 
         return final_response
+

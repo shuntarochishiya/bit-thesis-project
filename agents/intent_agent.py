@@ -171,6 +171,26 @@ class IntentRecognitionAgent:
             "what do you know",
         }
 
+        # =========================================================
+        # Apology / reconciliation
+        # =========================================================
+        # Apologies are social interactions. They must reach DialogueAgent
+        # instead of falling through to general_action.
+        self.apology_phrases = {
+            "sorry",
+            "i am sorry",
+            "i'm sorry",
+            "apologize",
+            "apologise",
+            "i apologize",
+            "i apologise",
+            "my apologies",
+            "forgive me",
+            "pardon me",
+            "my mistake",
+            "i regret",
+        }
+
         self.dialogue_continuation_phrases = {
             "tell me more",
             "continue",
@@ -384,6 +404,28 @@ class IntentRecognitionAgent:
     # Public API
     # =============================================================
 
+
+    def _is_tavern_tip(self, text: str, context: Dict[str, Any]) -> bool:
+        """Detect an explicit attempt to leave the bartender a monetary tip."""
+        lowered = (text or "").lower()
+        tip_phrases = [
+            "tip", "tips", "leave a tip", "leave tip", "give a tip",
+            "tip the bartender", "tip bartender", "gratuity",
+        ]
+        if not any(phrase in lowered for phrase in tip_phrases):
+            return False
+
+        active_location = str(context.get("active_location", "")).lower()
+        active_target = str(context.get("active_target", "")).lower()
+        active_conversation = str(context.get("active_conversation", "")).lower()
+
+        return (
+            "bartender" in lowered
+            or active_location == "tavern"
+            or active_target == "bartender"
+            or active_conversation == "bartender"
+        )
+
     def recognize_intent(
         self,
         player_input: str,
@@ -415,6 +457,16 @@ class IntentRecognitionAgent:
                 target=None,
                 confidence=0.2,
                 reason="empty input",
+            )
+
+        # Tavern tips are authoritative gameplay transactions, not dialogue.
+        # This check must happen before generic bartender dialogue routing.
+        if self._is_tavern_tip(text=text, context=context):
+            return self._build_result(
+                intent="tavern_action",
+                target="bartender",
+                confidence=0.99,
+                reason="explicit bartender tip transaction",
             )
 
         # =========================================================
@@ -455,6 +507,28 @@ class IntentRecognitionAgent:
                 target=combat_target,
                 confidence=0.99,
                 reason="combat keyword",
+            )
+
+        # =========================================================
+        # 1.5 Apology / reconciliation
+        # =========================================================
+        # A direct apology is dialogue with the addressed/active NPC.
+        # It is intentionally checked before generic persuasion/dialogue.
+        if self._is_apology(
+            text=text,
+            explicit_target=explicit_npc_target,
+            context=context,
+        ):
+            apology_target = (
+                explicit_npc_target
+                or context_npc_target
+            )
+
+            return self._build_result(
+                intent="dialogue_action",
+                target=apology_target,
+                confidence=0.98,
+                reason="apology or reconciliation directed at NPC",
             )
 
         # =========================================================
@@ -870,6 +944,29 @@ class IntentRecognitionAgent:
             re.search(pattern, text) is not None
             for pattern in attack_patterns
         )
+
+    def _is_apology(
+        self,
+        text: str,
+        explicit_target: Optional[str],
+        context: Dict[str, Any],
+    ) -> bool:
+        """
+        Detect an apology addressed to an NPC.
+
+        The target may be explicit ("sorry, merchant") or inherited from the
+        active conversation ("I am sorry for threatening you").
+        """
+        if not self._contains_any(text, self.apology_phrases):
+            return False
+
+        target = explicit_target or self._context_target(context)
+
+        return target in {
+            "merchant",
+            "bartender",
+            "enemy",
+        }
 
     def _is_tavern_service(
         self,

@@ -115,9 +115,13 @@ class DialogueGeneratorAgent:
             dialogue_context
         )
 
+        has_personal_beliefs = bool(
+            dialogue_context.get("relevant_semantic_beliefs", [])
+        )
+
         response_source = (
             "llm_with_memory"
-            if relevant_memories
+            if relevant_memories or has_personal_beliefs
             else "llm"
         )
 
@@ -317,6 +321,15 @@ class DialogueGeneratorAgent:
         )
 
         memory_text = self._format_memories(memories)
+
+        semantic_beliefs = dialogue_context.get(
+            "relevant_semantic_beliefs",
+            []
+        )
+        belief_text = self._format_semantic_beliefs(
+            semantic_beliefs
+        )
+
         conversation_history = dialogue_context.get(
             "conversation_history",
             []
@@ -342,6 +355,7 @@ RULES
 - Develop ONE main rumor, answer, or conversational thread per reply unless the player explicitly asks for several.
 - For follow-ups such as "more details", "why?" or "go on", continue the exact subject from RECENT CONVERSATION.
 - Rumors and invented conversational color are allowed, but uncertain claims must sound like hearsay, belief or suspicion.
+- NPC BELIEFS are this NPC's personal conclusions about the player; use them to shape attitude and wording, but do not present them as objective world facts.
 - Never invent completed gameplay changes, contradict verified facts, or reveal knowledge this NPC should not have.
 - If refusing, refuse briefly but in character.
 
@@ -361,6 +375,9 @@ RECENT CONVERSATION
 
 RELEVANT MEMORY
 {memory_text}
+
+NPC BELIEFS
+{belief_text}
 
 WORLD
 {world_context}
@@ -556,6 +573,72 @@ Return only the spoken reply.
                 break
 
         return unique_memories
+
+    @staticmethod
+    def _format_semantic_beliefs(
+        beliefs: Any
+    ) -> str:
+        """
+        Format personal NPC beliefs separately from event memories.
+
+        Negative scores are rendered as opposite beliefs rather than as
+        confusing negative confidence values.
+        """
+        if not isinstance(beliefs, list) or not beliefs:
+            return "- No stable personal beliefs about the player yet."
+
+        opposites = {
+            "dangerous": "not dangerous",
+            "trustworthy": "untrustworthy",
+            "generous": "not generous",
+        }
+
+        lines: List[str] = []
+
+        for belief in beliefs[:5]:
+            if not isinstance(belief, dict):
+                continue
+
+            subject = str(belief.get("subject", "player"))
+            predicate = str(belief.get("predicate", "unknown"))
+
+            try:
+                score = float(
+                    belief.get(
+                        "score",
+                        belief.get("confidence", 0.0),
+                    )
+                )
+            except (TypeError, ValueError):
+                continue
+
+            score = max(-1.0, min(1.0, score))
+            strength = abs(score)
+
+            if score >= 0:
+                meaning = predicate
+            else:
+                meaning = opposites.get(
+                    predicate,
+                    f"not {predicate}",
+                )
+
+            if strength >= 0.75:
+                qualifier = "strongly believes"
+            elif strength >= 0.40:
+                qualifier = "believes"
+            else:
+                qualifier = "somewhat believes"
+
+            lines.append(
+                f"- {subject}: {qualifier} {meaning} "
+                f"(belief score {score:+.2f})"
+            )
+
+        if not lines:
+            return "- No stable personal beliefs about the player yet."
+
+        return "\n".join(lines)
 
     @staticmethod
     def _format_conversation_history(

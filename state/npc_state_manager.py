@@ -42,6 +42,7 @@ class NPCStateManager:
             "last_action": None,
             "last_interaction": None,
             "personal_memory": [],
+            "semantic_beliefs": {},
             "relationship_modifiers": {},
             "status_effects": [],
         }
@@ -386,7 +387,7 @@ class NPCStateManager:
             "apologized": 55,
         }.get(event_type, 55)
 
-        return self.add_memory(
+        memory = self.add_memory(
             npc_id=npc_id,
             event=f"{related_entity} {event_type} this NPC.",
             importance=importance,
@@ -399,6 +400,156 @@ class NPCStateManager:
             confidence=confidence,
             metadata={"relationship_event": True},
         )
+
+        self.update_semantic_beliefs_from_event(
+            npc_id=npc_id,
+            event_type=event_type,
+            source_event_id=memory.get("id"),
+            subject=related_entity,
+        )
+        return memory
+
+
+    def update_semantic_beliefs_from_event(
+        self,
+        npc_id: str,
+        event_type: str,
+        source_event_id: Optional[str] = None,
+        subject: str = "player",
+    ) -> Dict[str, Dict[str, Any]]:
+        """Consolidate episodic relationship evidence into stable NPC beliefs."""
+        npc_id = NPCProfiles.normalize_npc_id(npc_id)
+        event_type = str(event_type or "").strip().lower()
+
+        evidence_map = {
+            "helped": {"dangerous": -0.08, "trustworthy": 0.25, "generous": 0.05},
+            "bought_goods": {"trustworthy": 0.06, "generous": 0.04},
+            "bought_drink": {"trustworthy": 0.05, "generous": 0.04},
+            "left_tip": {"trustworthy": 0.08, "generous": 0.22},
+            "insulted": {"dangerous": 0.05, "trustworthy": -0.15},
+            "threatened": {"dangerous": 0.30, "trustworthy": -0.25},
+            "attacked": {"dangerous": 0.45, "trustworthy": -0.40},
+            "robbed": {"dangerous": 0.40, "trustworthy": -0.45, "generous": -0.10},
+            "apologized": {"dangerous": -0.05, "trustworthy": 0.12},
+        }
+        evidence = evidence_map.get(event_type)
+        if not evidence:
+            return self.get_semantic_beliefs(npc_id)
+
+        state = self.get_state(npc_id)
+        beliefs = copy.deepcopy(state.get("semantic_beliefs", {}))
+        now = datetime.now().isoformat(timespec="seconds")
+
+        for predicate, delta in evidence.items():
+            key = f"{subject}_{predicate}"
+            belief = copy.deepcopy(beliefs.get(key, {
+                "id": f"belief_{key}",
+                "subject": subject,
+                "predicate": predicate,
+                "score": 0.0,
+                "confidence": 0.0,
+                "source": "inferred",
+                "source_event_ids": [],
+                "supporting_events": 0,
+                "contradicting_events": 0,
+                "last_updated": None,
+            }))
+
+            # Signed semantic score:
+            #   +1.0 = strong belief that the predicate is true
+            #   -1.0 = strong belief that the opposite is true
+            # confidence is the strength of that belief, regardless of direction.
+            old_score = float(
+                belief.get(
+                    "score",
+                    belief.get("confidence", 0.0),
+                )
+            )
+            new_score = max(-1.0, min(1.0, old_score + float(delta)))
+            belief["score"] = round(new_score, 3)
+            belief["confidence"] = round(abs(new_score), 3)
+            belief["source"] = "inferred"
+
+            ids = list(belief.get("source_event_ids", []))
+            if source_event_id and source_event_id not in ids:
+                ids.append(source_event_id)
+            belief["source_event_ids"] = ids[-20:]
+
+            counter = "supporting_events" if delta >= 0 else "contradicting_events"
+            belief[counter] = int(belief.get(counter, 0)) + 1
+            belief["last_updated"] = now
+            beliefs[key] = belief
+
+        self.update_state(
+            npc_id, {"semantic_beliefs": beliefs},
+            "NPCStateManager",
+            f"Semantic beliefs consolidated from relationship event: {event_type}",
+        )
+        return copy.deepcopy(beliefs)
+
+    def get_semantic_beliefs(
+        self,
+        npc_id: str,
+        subject: Optional[str] = None,
+        min_confidence: float = 0.05,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Return stable semantic beliefs held by one NPC."""
+        beliefs = copy.deepcopy(
+            self.get_state(NPCProfiles.normalize_npc_id(npc_id)).get("semantic_beliefs", {})
+        )
+        threshold = max(0.0, min(1.0, float(min_confidence)))
+        return {
+            key: belief for key, belief in beliefs.items()
+            if isinstance(belief, dict)
+            and (subject is None or belief.get("subject") == subject)
+            and abs(float(
+                belief.get("score", belief.get("confidence", 0.0))
+            )) >= threshold
+        }
+
+    def get_relevant_semantic_beliefs(
+        self,
+        npc_id: str,
+        subject: str = "player",
+        limit: int = 5,
+        min_confidence: float = 0.10,
+    ) -> List[Dict[str, Any]]:
+        """Return strongest NPC beliefs for dialogue/decision context."""
+        beliefs = list(self.get_semantic_beliefs(
+            npc_id, subject=subject, min_confidence=min_confidence
+        ).values())
+        beliefs.sort(
+            key=lambda x: (
+                abs(float(x.get("score", x.get("confidence", 0.0)))),
+                str(x.get("last_updated", "")),
+            ),
+            reverse=True,
+        )
+        return copy.deepcopy(beliefs[:max(1, int(limit))])
+
+    @staticmethod
+    def format_semantic_belief(belief: Dict[str, Any]) -> str:
+        """Convert one signed semantic belief into compact human-readable text."""
+        subject = str(belief.get("subject", "player"))
+        predicate = str(belief.get("predicate", "unknown"))
+        score = float(belief.get("score", belief.get("confidence", 0.0)))
+        strength = abs(score)
+
+        opposites = {
+            "dangerous": "not dangerous",
+            "trustworthy": "untrustworthy",
+            "generous": "not generous",
+        }
+        label = predicate if score >= 0 else opposites.get(predicate, f"not {predicate}")
+
+        if strength >= 0.75:
+            qualifier = "strongly believes"
+        elif strength >= 0.40:
+            qualifier = "believes"
+        else:
+            qualifier = "somewhat believes"
+
+        return f"{subject}: {qualifier} {label} ({score:+.2f})"
 
     def build_simulation_context(self, npc_id: str) -> Dict[str, Any]:
         npc_id = NPCProfiles.normalize_npc_id(npc_id)
@@ -422,6 +573,7 @@ class NPCStateManager:
             and isinstance(state.get("alive"), bool)
             and isinstance(state.get("hostile"), bool)
             and isinstance(state.get("personal_memory"), list)
+            and isinstance(state.get("semantic_beliefs"), dict)
             and isinstance(state.get("status_effects"), list)
         )
 

@@ -1,1 +1,116 @@
-[]
+[
+  {
+    "timestamp": "2026-09-21T19:50:47",
+    "player_input": "I talk to a merchant",
+    "intent": "dialogue_action",
+    "target": "merchant",
+    "system_result": "I've had quite enough of your shenanigans, traveler. My goods are not for sale to those who can't be trusted. Perhaps once you've earned my respect, we might do business again. But until then, keep your coin and move along.",
+    "state_changes": {
+      "relationship_with_merchant": {
+        "before": 15,
+        "after": 11
+      }
+    },
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": true,
+      "relationship_with_merchant": 11,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 50,
+      "bartender_mood": "neutral",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "town",
+      "world_mood": "hostile"
+    }
+  },
+  {
+    "timestamp": "2026-09-21T19:51:06",
+    "player_input": "I am sorry for threatening you",
+    "intent": "general_action",
+    "target": "merchant",
+    "system_result": "Semantic memory retrieval completed.",
+    "state_changes": {},
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": true,
+      "relationship_with_merchant": 11,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 50,
+      "bartender_mood": "neutral",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "town",
+      "world_mood": "hostile"
+    }
+  },
+  {
+    "timestamp": "2026-09-21T19:55:30",
+    "player_input": "I talk to a merchant",
+    "intent": "dialogue_action",
+    "target": "merchant",
+    "system_result": "I've been watching you, traveler, and while your coin purse seems rather thin for my taste, I must admit there's something about your adventurous spirit that intrigues me. But be warned – trust isn't given freely in these parts. Perhaps if you prove yourself worthy, we might do business together. In the meantime, let's see how far your luck carries you elsewhere.",
+    "state_changes": {},
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 50,
+      "bartender_mood": "neutral",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "old forest",
+      "world_mood": "mysterious"
+    }
+  },
+  {
+    "timestamp": "2026-09-21T19:56:04",
+    "player_input": "I will gut you if you don't give me a discount",
+    "intent": "persuasion_action",
+    "target": "merchant",
+    "system_result": "My, my, have we met again, traveler! Aren't we full of threats? But I see potential in your audacity. If you continue to prove yourself and show loyalty, perhaps one day I will bend on price. However, until that day comes, best keep your temper in check if you wish to do business here.",
+    "state_changes": {
+      "world_mood": {
+        "before": "mysterious",
+        "after": "hopeful"
+      },
+      "relationship_with_merchant": {
+        "before": 50,
+        "after": 55
+      }
+    },
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 55,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 50,
+      "bartender_mood": "neutral",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "old forest",
+      "world_mood": "hopeful"
+    }
+  }
+]

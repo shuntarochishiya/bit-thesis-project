@@ -1354,6 +1354,17 @@ class DialogueAgent:
             limit=5,
         )
 
+        semantic_beliefs = npc_state.get(
+            "semantic_beliefs",
+            {}
+        )
+
+        relevant_semantic_beliefs = self._select_relevant_semantic_beliefs(
+            semantic_beliefs,
+            subject="player",
+            limit=5,
+        )
+
         semantic_memory_text = " ".join(
             str(item)
             for item in relevant_memory
@@ -1406,6 +1417,12 @@ class DialogueAgent:
             ),
             "personal_memories": personal_memories,
             "relevant_personal_memories": relevant_personal_memories,
+
+            # Personal semantic beliefs are intentionally separate from
+            # the global/vector semantic memory archive.
+            "semantic_beliefs": semantic_beliefs,
+            "relevant_semantic_beliefs": relevant_semantic_beliefs,
+
             "semantic_memories": relevant_memory,
             "memory_text": memory_text,
             "consequence_result": consequence_result
@@ -1469,6 +1486,71 @@ class DialogueAgent:
             selected.append(clean)
 
         return selected
+
+    @staticmethod
+    def _select_relevant_semantic_beliefs(
+        beliefs: Any,
+        subject: str = "player",
+        limit: int = 5,
+        threshold: float = 0.05,
+    ) -> List[Dict[str, Any]]:
+        """
+        Select the strongest personal semantic beliefs about the player.
+
+        Belief score is signed:
+          +1.0 -> strong belief that predicate is true
+          -1.0 -> strong belief that the opposite is true
+
+        Global/vector semantic memories are NOT handled here.
+        """
+        if isinstance(beliefs, dict):
+            raw_beliefs = list(beliefs.values())
+        elif isinstance(beliefs, list):
+            raw_beliefs = beliefs
+        else:
+            return []
+
+        selected: List[Dict[str, Any]] = []
+
+        for belief in raw_beliefs:
+            if not isinstance(belief, dict):
+                continue
+
+            belief_subject = str(belief.get("subject", "player")).strip().lower()
+            if belief_subject != str(subject).strip().lower():
+                continue
+
+            try:
+                score = float(
+                    belief.get(
+                        "score",
+                        belief.get("confidence", 0.0),
+                    )
+                )
+            except (TypeError, ValueError):
+                continue
+
+            score = max(-1.0, min(1.0, score))
+            if abs(score) < float(threshold):
+                continue
+
+            clean = dict(belief)
+            clean["score"] = round(score, 3)
+            clean["confidence"] = round(
+                abs(float(clean.get("confidence", abs(score)))),
+                3,
+            )
+            selected.append(clean)
+
+        selected.sort(
+            key=lambda item: (
+                abs(float(item.get("score", 0.0))),
+                str(item.get("last_updated", "")),
+            ),
+            reverse=True,
+        )
+
+        return selected[:max(1, int(limit))]
 
     @staticmethod
     def _format_personal_memory(memory: Dict[str, Any]) -> str:
@@ -1622,3 +1704,4 @@ class DialogueAgent:
             phrase.lower() in normalized_text
             for phrase in phrases
         )
+

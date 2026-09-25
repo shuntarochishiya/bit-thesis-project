@@ -1,4 +1,5 @@
 from typing import Dict, Any
+import re
 
 
 class TavernAgent:
@@ -120,6 +121,9 @@ class TavernAgent:
     def detect_service_action(self, player_input: str) -> str:
         text = player_input.lower()
 
+        if any(word in text for word in ["tip", "gratuity"]):
+            return "leave_tip"
+
         if any(word in text for word in ["leave", "exit", "outside"]):
             return "leave_tavern"
 
@@ -191,6 +195,117 @@ class TavernAgent:
         base_price = self.drink_menu[drink_type]["base_price"]
         quality_modifier = self.detect_quality_modifier(player_input)
         return max(round(base_price * quality_modifier), 1)
+
+
+    def detect_tip_amount(self, player_input: str) -> int | None:
+        """
+        Extract an explicit positive coin amount from a tip command.
+        The backend never invents a monetary amount.
+        """
+        text = (player_input or "").lower()
+
+        patterns = [
+            r"(?:tip|gratuity)\D{0,20}(\d+)\s*(?:coin|coins|gold)?",
+            r"(\d+)\s*(?:coin|coins|gold)?\D{0,20}(?:tip|gratuity)",
+            r"leave\s+(\d+)\s*(?:coin|coins|gold)?\s+as\s+(?:a\s+)?tip",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                amount = int(match.group(1))
+                return amount if amount > 0 else None
+
+        return None
+
+    def handle_tip(
+        self,
+        game_state: Dict[str, Any],
+        player_input: str,
+    ) -> Dict[str, Any]:
+        """
+        Execute a deterministic monetary tip transaction.
+
+        A tip only becomes a relationship/memory event after gold was
+        successfully deducted.
+        """
+        amount = self.detect_tip_amount(player_input)
+        current_gold = int(game_state.get("gold", 0))
+        current_relationship = int(
+            game_state.get("relationship_with_bartender", 50)
+        )
+
+        if amount is None:
+            return self._result(
+                success=False,
+                message="How many coins would you like to leave as a tip?",
+                state_updates=self.apply_base_updates({}, player_input),
+                action_type="leave_tip",
+                data={
+                    "tip_completed": False,
+                    "needs_amount": True,
+                    "relationship_event": None,
+                },
+            )
+
+        if current_gold < amount:
+            return self._result(
+                success=False,
+                message=(
+                    f"You do not have enough gold to leave a {amount}-coin tip. "
+                    f"You currently have {current_gold} coins."
+                ),
+                state_updates=self.apply_base_updates({}, player_input),
+                action_type="leave_tip",
+                data={
+                    "tip_amount": amount,
+                    "gold_before": current_gold,
+                    "gold_after": current_gold,
+                    "tip_completed": False,
+                    "relationship_event": None,
+                },
+            )
+
+        new_gold = current_gold - amount
+
+        # Small game-state relationship bonus; the richer emotional/social
+        # consequences live in NPCStateManager via the left_tip event.
+        if amount >= 10:
+            relationship_bonus = 5
+        elif amount >= 5:
+            relationship_bonus = 3
+        else:
+            relationship_bonus = 2
+
+        return self._result(
+            success=True,
+            message=(
+                f"You leave the bartender a tip of {amount} coins. "
+                f"You now have {new_gold} coins."
+            ),
+            state_updates=self.apply_base_updates(
+                {
+                    "gold": new_gold,
+                    "relationship_with_bartender": min(
+                        current_relationship + relationship_bonus, 100
+                    ),
+                    "bartender_mood": "grateful",
+                    "world_mood": "warm",
+                },
+                player_input,
+            ),
+            action_type="leave_tip",
+            data={
+                "tip_amount": amount,
+                "gold_before": current_gold,
+                "gold_after": new_gold,
+                "relationship_bonus": relationship_bonus,
+                "tip_completed": True,
+                "relationship_event": "left_tip",
+                "related_entity": "player",
+                "memory_source": "experienced",
+                "memory_confidence": 1.0,
+            },
+        )
 
     def handle_drink_order(
         self,
@@ -477,6 +592,9 @@ class TavernAgent:
                 },
             )
 
+        if action_type == "leave_tip":
+            return self.handle_tip(game_state, player_input)
+
         if action_type == "buy_drink":
             return self.handle_drink_order(game_state, player_input)
 
@@ -487,3 +605,4 @@ class TavernAgent:
             return self.handle_room_rental(game_state, player_input)
 
         return self.handle_observe_tavern(player_input)
+
