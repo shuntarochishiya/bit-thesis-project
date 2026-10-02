@@ -1,13 +1,52 @@
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 
 class PreconditionAgent:
     """
     Checks preconditions before the main action is executed.
 
-    These checks are designed as independent DAG nodes.
-    Later they can be executed in parallel with semantic memory retrieval.
+    Besides ordinary location/resource/health checks, this agent now enforces
+    NPC presence. A player may only interact with an NPC that is physically
+    available at the current location.
     """
+
+    # Current prototype world placement.
+    # This is intentionally deterministic and can later be moved to world data
+    # or Unity scene metadata without changing the validation API.
+    NPC_LOCATIONS = {
+        "merchant": {"village", "town", "market"},
+        "bartender": {"tavern"},
+    }
+
+    @staticmethod
+    def _normalized_location(game_state: Dict[str, Any]) -> str:
+        return str(
+            game_state.get("location")
+            or game_state.get("active_location")
+            or "unknown"
+        ).strip().lower()
+
+    @classmethod
+    def _npc_present(
+        cls,
+        target: Optional[str],
+        game_state: Dict[str, Any],
+    ) -> bool:
+        target = str(target or "").strip().lower()
+
+        # Enemies are governed by combat/current-enemy state rather than a
+        # fixed settlement location in this prototype.
+        if target in {"", "enemy"}:
+            return True
+
+        allowed_locations = cls.NPC_LOCATIONS.get(target)
+        if not allowed_locations:
+            # Unknown/dynamic NPCs are not rejected here; Unity/world data can
+            # later provide their presence explicitly.
+            return True
+
+        location = cls._normalized_location(game_state)
+        return location in allowed_locations
 
     def validate_location(
         self,
@@ -17,7 +56,7 @@ class PreconditionAgent:
         player_input: str
     ) -> Dict[str, Any]:
         text = player_input.lower()
-        location = game_state.get("location", "unknown")
+        location = self._normalized_location(game_state)
 
         if intent == "tavern_action":
             tavern_words = [
@@ -82,6 +121,34 @@ class PreconditionAgent:
         game_state: Dict[str, Any],
         player_input: str
     ) -> Dict[str, Any]:
+        target = str(target or "").strip().lower()
+
+        # Presence is checked here because dialogue/combat DAGs already call
+        # check_target_status. No new DAG node is required.
+        interaction_intents = {
+            "dialogue_action",
+            "persuasion_action",
+            "combat_action",
+            "trade_action",
+            "tavern_action",
+        }
+
+        if (
+            target in self.NPC_LOCATIONS
+            and intent in interaction_intents
+            and not self._npc_present(target, game_state)
+        ):
+            location = self._normalized_location(game_state)
+            return {
+                "success": False,
+                "message": (
+                    f"The {target} is not present at the current location "
+                    f"({location}), so this interaction cannot be performed."
+                ),
+                "state_updates": {},
+                "precondition_type": "target_presence"
+            }
+
         if target == "enemy" and game_state.get("enemy_health", 0) <= 0:
             return {
                 "success": False,

@@ -184,7 +184,16 @@ class NPCStateManager:
         memories = list(state["personal_memory"])
 
         source_norm = str(source or "experienced").strip().lower()
-        if source_norm not in {"experienced", "witnessed", "heard", "inferred"}:
+        valid_sources = {
+            "experienced",   # directly happened to this NPC
+            "witnessed",     # directly observed by this NPC
+            "heard",         # told by another source
+            "hearsay",       # indirect rumor
+            "npc_claim",     # claim made by an NPC; not authoritative truth
+            "world_fact",    # authoritative fact explicitly made known to NPC
+            "inferred",      # conclusion derived by the NPC
+        }
+        if source_norm not in valid_sources:
             source_norm = "experienced"
 
         try:

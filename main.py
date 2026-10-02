@@ -1,4 +1,55 @@
+from difflib import get_close_matches
+
 from orchestration.orchestration_agent import OrchestrationAgent
+
+
+EXACT_COMMAND_ALIASES = {
+    "exit": "exit", "quit": "exit", "q": "exit",
+    "state": "state", "status": "state",
+    "memory": "memory", "show memory": "memory",
+    "clear memory": "clear memory", "reset memory": "clear memory",
+    "context": "context", "ctx": "context",
+    "log": "log", "last log": "log", "execution log": "log",
+    "audit": "audit", "audit log": "audit", "state audit": "audit",
+    "snapshots": "snapshots", "show snapshots": "snapshots",
+    "rebuild semantic": "rebuild semantic",
+    "rebuild semantic memory": "rebuild semantic",
+}
+
+FUZZY_COMMANDS = {
+    "state", "status", "memory", "context", "audit", "snapshots", "log",
+}
+
+
+def normalize_cli_command(player_input: str):
+    """Return (command, argument, corrected_from)."""
+    raw = " ".join(str(player_input).strip().lower().split())
+
+    if raw in EXACT_COMMAND_ALIASES:
+        return EXACT_COMMAND_ALIASES[raw], None, None
+
+    if raw.startswith("semantic "):
+        query = player_input.strip()[len("semantic "):].strip()
+        if query:
+            return "semantic", query, None
+
+    # Allow a typo only in the semantic command prefix.
+    parts = raw.split(maxsplit=1)
+    if len(parts) == 2:
+        prefix, query = parts
+        if get_close_matches(prefix, ["semantic"], n=1, cutoff=0.80):
+            return "semantic", query, prefix
+
+    # Do not fuzzy-correct ordinary multi-word gameplay text.
+    if " " in raw or not raw:
+        return None, None, None
+
+    match = get_close_matches(raw, FUZZY_COMMANDS, n=1, cutoff=0.72)
+    if match:
+        canonical = EXACT_COMMAND_ALIASES.get(match[0], match[0])
+        return canonical, None, raw
+
+    return None, None, None
 
 
 def main():
@@ -19,45 +70,42 @@ def main():
 
     while True:
         player_input = input("Player: ")
+        command, argument, corrected_from = normalize_cli_command(player_input)
 
-        if player_input.lower() in ["exit", "quit", "q"]:
+        if corrected_from:
+            if command == "semantic":
+                print(f"[CLI] Interpreting '{corrected_from}' as 'semantic'.")
+            else:
+                print(f"[CLI] Interpreting '{corrected_from}' as '{command}'.")
+
+        if command == "exit":
             print("Goodbye!")
             break
-
-        if player_input.lower() in ["state", "status"]:
+        if command == "state":
             game.show_state()
             continue
-
-        if player_input.lower() in ["memory", "show memory"]:
+        if command == "memory":
             game.show_memory()
             continue
-
-        if player_input.lower() in ["clear memory", "reset memory"]:
+        if command == "clear memory":
             game.clear_memory()
             continue
-
-        if player_input.lower() in ["context", "ctx"]:
+        if command == "context":
             game.show_context()
             continue
-
-        if player_input.lower() in ["log", "last log", "execution log"]:
+        if command == "log":
             game.show_last_log()
             continue
-
-        if player_input.lower() in ["audit", "audit log", "state audit"]:
+        if command == "audit":
             game.show_audit_log()
             continue
-
-        if player_input.lower() in ["snapshots", "show snapshots"]:
+        if command == "snapshots":
             game.show_snapshots()
             continue
-
-        if player_input.lower().startswith("semantic "):
-            query = player_input[len("semantic "):]
-            game.search_semantic_memory(query)
+        if command == "semantic":
+            game.search_semantic_memory(argument)
             continue
-
-        if player_input.lower() in ["rebuild semantic", "rebuild semantic memory"]:
+        if command == "rebuild semantic":
             game.rebuild_semantic_memory()
             continue
 

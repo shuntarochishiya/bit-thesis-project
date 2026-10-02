@@ -470,6 +470,18 @@ class IntentRecognitionAgent:
             )
 
         # =========================================================
+        # Tavern exit
+        # =========================================================
+        # Equivalent exit wording must use the same authoritative tavern path.
+        if self._is_tavern_exit(text=text, context=context):
+            return self._build_result(
+                intent="tavern_action",
+                target="bartender",
+                confidence=0.99,
+                reason="explicit tavern exit",
+            )
+
+        # =========================================================
         # 0. Social threat / intimidation
         # =========================================================
         if self._is_social_threat(
@@ -967,6 +979,33 @@ class IntentRecognitionAgent:
             "bartender",
             "enemy",
         }
+
+    def _is_tavern_exit(
+        self,
+        text: str,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """Detect explicit requests to leave the tavern."""
+        context = context or {}
+        active_location = self._active_location(context)
+
+        exit_phrases = {
+            "leave tavern",
+            "leave the tavern",
+            "exit tavern",
+            "exit the tavern",
+            "leave inn",
+            "leave the inn",
+            "exit inn",
+            "exit the inn",
+            "go outside",
+            "step outside",
+        }
+
+        return (
+            active_location == "tavern"
+            and self._contains_any(text, exit_phrases)
+        )
 
     def _is_tavern_service(
         self,

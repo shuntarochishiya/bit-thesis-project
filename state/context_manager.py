@@ -19,9 +19,15 @@ class ContextManager:
     def get_context(self) -> Dict[str, Optional[str]]:
         return self.context.copy()
 
-    def update_after_turn(self, player_input: str, intent: str,
-                          target: Optional[str], system_result: str,
-                          game_state: Dict[str, Any]):
+    def update_after_turn(
+        self,
+        player_input: str,
+        intent: str,
+        target: Optional[str],
+        system_result: str,
+        game_state: Dict[str, Any],
+    ):
+        previous_location = self.context.get("active_location")
         location = game_state.get("location")
         if location not in (None, "", "unknown"):
             self.context["active_location"] = str(location)
@@ -31,6 +37,19 @@ class ContextManager:
         self.context["last_system_result"] = system_result
 
         target_norm = self._normalize_target(target)
+        current_location = self.context.get("active_location")
+
+        # Any physical scene transition closes the previous NPC conversation.
+        # This fixes cases such as leaving the tavern, where the intent may still
+        # be tavern_action even though the player has moved to the village.
+        if (
+            previous_location not in (None, "", "unknown")
+            and current_location not in (None, "", "unknown")
+            and str(previous_location) != str(current_location)
+        ):
+            self.context["active_target"] = None
+            self.context["active_conversation"] = None
+            return
 
         if intent == "exploration_action":
             self.context["active_target"] = None

@@ -195,6 +195,22 @@ class ExecutionEngine:
         except Exception:
             return []
 
+    @staticmethod
+    def _is_npc_apology(player_input: str) -> bool:
+        """Return True when the player's dialogue is an explicit apology."""
+        text = (player_input or "").strip().lower()
+        apology_markers = (
+            "sorry",
+            "apologize",
+            "apologise",
+            "my apologies",
+            "forgive me",
+            "pardon me",
+            "my mistake",
+            "i regret",
+        )
+        return any(marker in text for marker in apology_markers)
+
     def _build_npc_social_response(
         self,
         target: str,
@@ -487,7 +503,8 @@ class ExecutionEngine:
                 "reaction_type": "none",
                 "retaliation_damage": 0,
                 "player_health_after": None,
-                "reaction_applied": False
+                "reaction_applied": False,
+                "npc_attack_memory_recorded": False
             },
             "consequence_result": {
                 "allow_action": True,
@@ -778,6 +795,25 @@ class ExecutionEngine:
                                 snapshot_id=snapshot_id
                             )
 
+                            # A completed attack against a persistent social NPC
+                            # is also a personal episodic event. Record it only
+                            # after deterministic combat/reaction state changes
+                            # have been applied successfully.
+                            if (
+                                not execution_context["action_blocked"]
+                                and target in {"merchant", "bartender"}
+                                and self.npc_state_manager is not None
+                                and not combat_context.get("npc_attack_memory_recorded", False)
+                            ):
+                                self.npc_state_manager.apply_relationship_event(
+                                    npc_id=target,
+                                    event_type="attacked",
+                                    related_entity="player",
+                                    source="experienced",
+                                    confidence=1.0,
+                                )
+                                combat_context["npc_attack_memory_recorded"] = True
+
                         else:
                             raise Exception(f"Unknown combat step: {step_name}")
 
@@ -983,6 +1019,23 @@ class ExecutionEngine:
                                 snapshot_id=snapshot_id
                             )
 
+                            # Persist an explicit apology as a personal NPC event.
+                            # Do this before DialogueAgent builds its decision so the
+                            # current reply can already see the updated memory/beliefs.
+                            if (
+                                not execution_context["action_blocked"]
+                                and self.npc_state_manager is not None
+                                and target
+                                and self._is_npc_apology(player_input)
+                            ):
+                                self.npc_state_manager.apply_relationship_event(
+                                    npc_id=target,
+                                    event_type="apologized",
+                                    related_entity="player",
+                                    source="experienced",
+                                    confidence=1.0,
+                                )
+
                             # DialogueStepAgent performs deterministic analysis,
                             # while DialogueAgent creates the structured NPC
                             # decision used by the LLM dialogue generator.
@@ -1052,6 +1105,21 @@ class ExecutionEngine:
                         completed_tasks[task_id] = result
 
                     elif agent_type == "dialogue":
+                        # Backward-compatible direct dialogue path.
+                        if (
+                            not execution_context["action_blocked"]
+                            and self.npc_state_manager is not None
+                            and target
+                            and self._is_npc_apology(player_input)
+                        ):
+                            self.npc_state_manager.apply_relationship_event(
+                                npc_id=target,
+                                event_type="apologized",
+                                related_entity="player",
+                                source="experienced",
+                                confidence=1.0,
+                            )
+
                         dialogue_relevant_memory: List[Any] = list(
                             execution_context["semantic_memory_results"]
                         )
@@ -1527,4 +1595,3 @@ class ExecutionEngine:
         )
 
         return final_response
-

@@ -4,33 +4,33 @@ from agents.primitive_agents import AttributeCalculationAgent, ValidationAgent
 
 class CombatAgent:
     """
-    Composite agent.
-    It uses primitive agents to process combat.
+    Composite deterministic combat agent.
+
+    NPC attacks return a structured relationship_event so ExecutionEngine can
+    persist the attack into that NPC's episodic memory and semantic beliefs.
     """
 
     def __init__(self, attribute_agent: AttributeCalculationAgent, validation_agent: ValidationAgent):
         self.attribute_agent = attribute_agent
         self.validation_agent = validation_agent
 
-    def execute(self, game_state: Dict[str, Any], target: str = "enemy") -> Dict[str, Any]:
-        """
-        Executes combat logic.
-        The target can be either 'enemy' or 'merchant'.
-        This allows the system to react differently when the player attacks an NPC.
-        """
+    @staticmethod
+    def _npc_attack_metadata(target: str) -> Dict[str, Any]:
+        return {
+            "relationship_event": "attacked",
+            "related_entity": "player",
+            "memory_source": "experienced",
+            "memory_confidence": 1.0,
+            "relationship_npc": target,
+        }
 
-        # =========================
-        # Case 1: Player attacks merchant/vendor/trader
-        # =========================
+    def execute(self, game_state: Dict[str, Any], target: str = "enemy") -> Dict[str, Any]:
         if target == "merchant":
             if game_state["merchant_health"] <= 0:
-                return {
-                    "success": False,
-                    "message": "The merchant is already unable to respond.",
-                    "state_updates": {}
-                }
+                return {"success": False, "message": "The merchant is already unable to respond.", "state_updates": {}}
 
             hit = self.attribute_agent.calculate_hit()
+            metadata = self._npc_attack_metadata("merchant")
 
             if not hit:
                 return {
@@ -40,37 +40,32 @@ class CombatAgent:
                         "merchant_hostile": True,
                         "relationship_with_merchant": max(game_state["relationship_with_merchant"] - 30, 0),
                         "player_reputation": max(game_state["player_reputation"] - 15, 0),
-                        "world_mood": "tense"
-                    }
+                        "world_mood": "tense",
+                    },
+                    **metadata,
                 }
 
             damage = self.attribute_agent.calculate_damage()
             new_merchant_health = max(game_state["merchant_health"] - damage, 0)
-
             return {
                 "success": True,
-                "message": (
-                    f"The player attacks the merchant and deals {damage} damage. "
-                    "The merchant becomes hostile and will no longer trust the player."
-                ),
+                "message": f"The player attacks the merchant and deals {damage} damage. The merchant becomes hostile and will no longer trust the player.",
                 "state_updates": {
                     "merchant_health": new_merchant_health,
                     "merchant_hostile": True,
                     "relationship_with_merchant": max(game_state["relationship_with_merchant"] - 50, 0),
                     "player_reputation": max(game_state["player_reputation"] - 25, 0),
-                    "world_mood": "dangerous"
-                }
+                    "world_mood": "dangerous",
+                },
+                **metadata,
             }
 
         if target == "bartender":
             if game_state["bartender_health"] <= 0:
-                return {
-                    "success": False,
-                    "message": "The bartender is already unable to respond.",
-                    "state_updates": {}
-                }
+                return {"success": False, "message": "The bartender is already unable to respond.", "state_updates": {}}
 
             hit = self.attribute_agent.calculate_hit()
+            metadata = self._npc_attack_metadata("bartender")
 
             if not hit:
                 return {
@@ -82,19 +77,16 @@ class CombatAgent:
                         "tavern_reputation": max(game_state["tavern_reputation"] - 25, 0),
                         "player_reputation": max(game_state["player_reputation"] - 20, 0),
                         "bartender_mood": "angry",
-                        "world_mood": "dangerous"
-                    }
+                        "world_mood": "dangerous",
+                    },
+                    **metadata,
                 }
 
             damage = self.attribute_agent.calculate_damage()
             new_bartender_health = max(game_state["bartender_health"] - damage, 0)
-
             return {
                 "success": True,
-                "message": (
-                    f"The player attacks the bartender and deals {damage} damage. "
-                    "The bartender becomes hostile, and the tavern turns against the player."
-                ),
+                "message": f"The player attacks the bartender and deals {damage} damage. The bartender becomes hostile, and the tavern turns against the player.",
                 "state_updates": {
                     "bartender_health": new_bartender_health,
                     "bartender_hostile": True,
@@ -102,36 +94,22 @@ class CombatAgent:
                     "tavern_reputation": max(game_state["tavern_reputation"] - 40, 0),
                     "player_reputation": max(game_state["player_reputation"] - 30, 0),
                     "bartender_mood": "furious",
-                    "world_mood": "dangerous"
-                }
+                    "world_mood": "dangerous",
+                },
+                **metadata,
             }
 
-        # =========================
-        # Case 2: Player attacks normal enemy
-        # =========================
         if not self.validation_agent.validate_combat(game_state):
-            return {
-                "success": False,
-                "message": "There is no enemy to attack.",
-                "state_updates": {}
-            }
+            return {"success": False, "message": "There is no enemy to attack.", "state_updates": {}}
 
         hit = self.attribute_agent.calculate_hit()
-
         if not hit:
-            return {
-                "success": True,
-                "message": "The player attacks, but misses the enemy.",
-                "state_updates": {}
-            }
+            return {"success": True, "message": "The player attacks, but misses the enemy.", "state_updates": {}}
 
         damage = self.attribute_agent.calculate_damage()
         new_enemy_health = max(game_state["enemy_health"] - damage, 0)
-
         return {
             "success": True,
             "message": f"The player hits the enemy and deals {damage} damage.",
-            "state_updates": {
-                "enemy_health": new_enemy_health
-            }
+            "state_updates": {"enemy_health": new_enemy_health},
         }
