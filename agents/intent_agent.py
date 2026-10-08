@@ -430,6 +430,7 @@ class IntentRecognitionAgent:
         self,
         player_input: str,
         context: Optional[Dict[str, Any]] = None,
+        target_hint: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Classify the player's input and return a normalized result.
@@ -443,11 +444,20 @@ class IntentRecognitionAgent:
         }
         """
 
-        context = context or {}
+        context = dict(context or {})
         text = self._normalize(player_input)
 
+        target_hint = self._normalize_target_hint(target_hint)
+
+        # A frontend-selected NPC is physical interaction context, not a guess.
+        # It must override stale conversational context while an NPC explicitly
+        # named in the player's current text still has first priority.
+        if target_hint is not None:
+            context["active_target"] = target_hint
+            context["active_conversation"] = target_hint
+
         explicit_npc_target = self._detect_explicit_npc_target(text)
-        context_npc_target = self._context_target(context)
+        context_npc_target = target_hint or self._context_target(context)
 
         location_target = self._detect_location_target(text)
 
@@ -685,22 +695,26 @@ class IntentRecognitionAgent:
         self,
         player_input: str,
         context: Optional[Dict[str, Any]] = None,
+        target_hint: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Compatibility alias."""
         return self.recognize_intent(
             player_input,
-            context
+            context,
+            target_hint=target_hint,
         )
 
     def execute(
         self,
         player_input: str,
         context: Optional[Dict[str, Any]] = None,
+        target_hint: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Compatibility alias used by orchestration code."""
         return self.recognize_intent(
             player_input,
-            context
+            context,
+            target_hint=target_hint,
         )
 
     # =============================================================
@@ -1334,6 +1348,27 @@ class IntentRecognitionAgent:
             if normalized == canonical_target:
                 return canonical_target
 
+            for alias in aliases:
+                if normalized == self._normalize(alias):
+                    return canonical_target
+
+        return None
+
+    def _normalize_target_hint(
+        self,
+        target_hint: Optional[str],
+    ) -> Optional[str]:
+        """Normalize a frontend-selected NPC to a canonical backend target."""
+        if target_hint is None:
+            return None
+
+        normalized = self._normalize(target_hint)
+        if not normalized:
+            return None
+
+        for canonical_target, aliases in self.target_aliases.items():
+            if normalized == canonical_target:
+                return canonical_target
             for alias in aliases:
                 if normalized == self._normalize(alias):
                     return canonical_target

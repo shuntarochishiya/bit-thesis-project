@@ -178,7 +178,11 @@ class OrchestrationAgent:
     # Main turn processing
     # =============================================================
 
-    def process_player_input(self, player_input: str) -> str:
+    def process_player_input(
+        self,
+        player_input: str,
+        target_hint: str | None = None,
+    ) -> str:
         if not isinstance(player_input, str):
             raise TypeError("player_input must be a string")
 
@@ -186,6 +190,11 @@ class OrchestrationAgent:
 
         if not player_input:
             return "Please enter an action."
+
+        if target_hint is not None:
+            target_hint = str(target_hint).strip().lower()
+            if target_hint in {"", "unknown", "environment"}:
+                target_hint = None
 
         state_before = self.game_state_manager.get_state()
         current_context = self.context_manager.get_context()
@@ -203,10 +212,20 @@ class OrchestrationAgent:
         intent_data = self.intent_agent.recognize_intent(
             player_input=player_input,
             context=intent_context,
+            target_hint=target_hint,
         )
 
         intent = intent_data.get("intent", "general_action")
         target = intent_data.get("target")
+
+        # Explicit Unity interaction target has priority over stale
+        # conversational context, while an explicitly recognized target
+        # from the player's text still remains authoritative.
+        target = self._apply_target_hint(
+            intent=intent,
+            target=target,
+            target_hint=target_hint,
+        )
 
         target = self.context_manager.resolve_target_from_context(
             target,
@@ -234,6 +253,7 @@ class OrchestrationAgent:
             current_context=current_context,
             intent_data=intent_data,
             plan=plan,
+            target_hint=target_hint,
         )
 
         response = self.execution_engine.execute_plan(
@@ -263,6 +283,38 @@ class OrchestrationAgent:
     # =============================================================
     # Context and routing helpers
     # =============================================================
+
+    @staticmethod
+    def _apply_target_hint(
+        intent: str,
+        target: str | None,
+        target_hint: str | None,
+    ) -> str | None:
+        """
+        Apply an explicit interaction target supplied by a frontend such as Unity.
+
+        The hint is used only for NPC-facing intents and only when intent
+        recognition did not already resolve a concrete target. Gameplay
+        preconditions remain authoritative and may still block the action.
+        """
+        if not target_hint:
+            return target
+
+        interaction_intents = {
+            "dialogue_action",
+            "persuasion_action",
+            "combat_action",
+            "trade_action",
+            "tavern_action",
+        }
+
+        if intent not in interaction_intents:
+            return target
+
+        # Unity selected a concrete physical NPC. For NPC-facing actions,
+        # that selection is authoritative and must not be replaced by stale
+        # conversational context from another NPC.
+        return target_hint
 
     @staticmethod
     def _context_target_after_turn(
@@ -403,8 +455,11 @@ class OrchestrationAgent:
         current_context: dict[str, Any],
         intent_data: dict[str, Any],
         plan: list[dict[str, Any]],
+        target_hint: str | None = None,
     ) -> None:
         print("\n[DEBUG] Recognized intent:", intent)
+        print("[DEBUG] Unity target hint:", target_hint)
+        print("[DEBUG] Intent raw target:", intent_data.get("target"))
         print("[DEBUG] Target:", target)
         print("[DEBUG] Intent confidence:", intent_data.get("confidence"))
         print("[DEBUG] Intent reason:", intent_data.get("reason"))

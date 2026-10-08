@@ -14,8 +14,8 @@ class PreconditionAgent:
     # This is intentionally deterministic and can later be moved to world data
     # or Unity scene metadata without changing the validation API.
     NPC_LOCATIONS = {
-        "merchant": {"village", "town", "market"},
-        "bartender": {"tavern"},
+        "merchant": {"village", "town", "market", "prototype_hub"},
+        "bartender": {"tavern", "prototype_hub"},
     }
 
     @staticmethod

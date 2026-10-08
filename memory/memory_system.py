@@ -28,9 +28,15 @@ class MemorySystem:
         with open(self.memory_path, "w", encoding="utf-8") as file:
             json.dump(self.events, file, indent=2, ensure_ascii=False)
 
-    def add_event(self, player_input: str, intent: str, target: str,
-                  system_result: str, state_before: Dict[str, Any],
-                  state_after: Dict[str, Any]):
+    def add_event(
+        self,
+        player_input: str,
+        intent: str,
+        target: str,
+        system_result: str,
+        state_before: Dict[str, Any],
+        state_after: Dict[str, Any],
+    ):
         state_changes = self.calculate_state_changes(state_before, state_after)
         memory_item = {
             "timestamp": datetime.now().isoformat(timespec="seconds"),
@@ -55,14 +61,17 @@ class MemorySystem:
                 "enemy_health": state_after.get("enemy_health"),
                 "location": state_after.get("location"),
                 "world_mood": state_after.get("world_mood"),
-            }
+            },
         }
         self.events.append(memory_item)
         self.save_memory()
         return memory_item
 
-    def calculate_state_changes(self, state_before: Dict[str, Any],
-                                state_after: Dict[str, Any]) -> Dict[str, Any]:
+    def calculate_state_changes(
+        self,
+        state_before: Dict[str, Any],
+        state_after: Dict[str, Any],
+    ) -> Dict[str, Any]:
         changes = {}
         for key in set(state_before) | set(state_after):
             before_value = state_before.get(key)
@@ -71,14 +80,37 @@ class MemorySystem:
                 changes[key] = {"before": before_value, "after": after_value}
         return changes
 
-    def retrieve_dialogue_history(self, target: Optional[str],
-                                  limit: int = 3) -> List[Dict[str, str]]:
+    def retrieve_dialogue_history(
+        self,
+        target: Optional[str],
+        limit: int = 3,
+    ) -> List[Dict[str, str]]:
+        """
+        Return recent dialogue turns for one NPC only.
+
+        Switching to another NPC does NOT erase or close this NPC's working
+        dialogue. This lets the player talk to Merchant, switch to Bartender,
+        then return to Merchant and continue the previous thread.
+
+        Exploration/movement and combat remain hard conversation boundaries.
+        """
         if not target:
             return []
 
         target_norm = str(target).strip().lower()
-        dialogue_intents = {"dialogue_action", "persuasion_action", "tavern_action"}
-        boundary_intents = {"exploration_action", "combat_action"}
+
+        dialogue_intents = {
+            "dialogue_action",
+            "persuasion_action",
+            "tavern_action",
+        }
+
+        # These actions genuinely interrupt/close the current conversation.
+        boundary_intents = {
+            "exploration_action",
+            "combat_action",
+        }
+
         matched: List[Dict[str, str]] = []
 
         for item in reversed(self.events):
@@ -88,22 +120,27 @@ class MemorySystem:
             item_intent = str(item.get("intent") or "").strip().lower()
             item_target = str(item.get("target") or "").strip().lower()
 
-            # Movement/exploration/combat closes the current working conversation.
+            # Real scene/action boundaries still close working dialogue.
             if item_intent in boundary_intents:
                 break
 
-            # Dialogue with another NPC starts a different working conversation.
-            if (item_intent in dialogue_intents and item_target
-                    and item_target != target_norm):
-                break
+            # IMPORTANT:
+            # Dialogue with another NPC is simply skipped, not treated as a
+            # boundary. Each NPC therefore has an independent working thread.
+            if item_target != target_norm:
+                continue
 
-            if item_target != target_norm or item_intent not in dialogue_intents:
+            if item_intent not in dialogue_intents:
                 continue
 
             player_text = str(item.get("player_input") or "").strip()
             npc_text = str(item.get("system_result") or "").strip()
+
             if player_text or npc_text:
-                matched.append({"player": player_text, "npc": npc_text})
+                matched.append({
+                    "player": player_text,
+                    "npc": npc_text,
+                })
 
             if len(matched) >= max(1, limit):
                 break
@@ -122,7 +159,9 @@ class MemorySystem:
                     f"State changes: {item.get('state_changes')}"
                 )
             elif isinstance(item, dict) and "event" in item:
-                formatted_events.append(f"[{item.get('timestamp')}] {item.get('event')}")
+                formatted_events.append(
+                    f"[{item.get('timestamp')}] {item.get('event')}"
+                )
             else:
                 formatted_events.append(str(item))
         return formatted_events
@@ -142,6 +181,7 @@ class MemorySystem:
             print("No memory events available.")
             print("-------------------------\n")
             return
+
         for item in self.events[-limit:]:
             if isinstance(item, dict) and "player_input" in item:
                 print(f"\nTime: {item.get('timestamp')}")
@@ -150,19 +190,26 @@ class MemorySystem:
                 print(f"Target: {item.get('target')}")
                 print(f"System result: {item.get('system_result')}")
                 print("State changes:")
+
                 state_changes = item.get("state_changes", {})
                 if state_changes:
                     for key, value in state_changes.items():
-                        print(f"  - {key}: {value.get('before')} -> {value.get('after')}")
+                        print(
+                            f"  - {key}: "
+                            f"{value.get('before')} -> {value.get('after')}"
+                        )
                 else:
                     print("  - No state changes")
+
                 print("Important state after action:")
                 for key, value in item.get("important_state", {}).items():
                     print(f"  - {key}: {value}")
+
             elif isinstance(item, dict) and "event" in item:
                 print(f"[{item.get('timestamp')}] {item.get('event')}")
             else:
                 print(item)
+
         print("-------------------------\n")
 
     def clear_memory(self):
