@@ -1,3 +1,4 @@
+
 from typing import Dict, Any
 import re
 
@@ -93,7 +94,8 @@ class TavernAgent:
         ]
 
         if any(word in text for word in tavern_context_words):
-            updates.setdefault("location", "tavern")
+            # NPC interaction is not scene travel. Location is controlled by
+            # Unity /location or an explicit enter_tavern action.
             updates.setdefault("world_mood", "warm")
 
         updates.update(self.detect_bartender_identity(player_input))
@@ -195,7 +197,6 @@ class TavernAgent:
         base_price = self.drink_menu[drink_type]["base_price"]
         quality_modifier = self.detect_quality_modifier(player_input)
         return max(round(base_price * quality_modifier), 1)
-
 
     def detect_tip_amount(self, player_input: str) -> int | None:
         """
@@ -605,4 +606,3 @@ class TavernAgent:
             return self.handle_room_rental(game_state, player_input)
 
         return self.handle_observe_tavern(player_input)
-

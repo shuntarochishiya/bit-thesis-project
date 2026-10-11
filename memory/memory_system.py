@@ -109,6 +109,7 @@ class MemorySystem:
         boundary_intents = {
             "exploration_action",
             "combat_action",
+            "dialogue_reset",  # persistent global boundary for all NPC threads
         }
 
         matched: List[Dict[str, str]] = []

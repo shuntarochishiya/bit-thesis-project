@@ -7,11 +7,12 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from orchestration.orchestration_agent import OrchestrationAgent
+from reset_support import reset_dialogue, reset_all
 
 
 app = FastAPI(
     title="DynAgentGame API",
-    version="1.3.0",
+    version="1.4.0",
     description="HTTP bridge between Unity and the DynAgentGame backend.",
 )
 
@@ -26,7 +27,7 @@ ALLOWED_LOCATIONS = {
     "town",
     "market",
     "tavern",
-    "prototype_hub"
+    "prototype_hub",
 }
 
 
@@ -46,6 +47,12 @@ class InteractionResponse(BaseModel):
 
 class LocationRequest(BaseModel):
     location: str = Field(..., min_length=1)
+
+
+class ResetRequest(BaseModel):
+    # None means return to the backend's default starting location.
+    # Unity should send the location of the currently loaded scene.
+    location: str | None = None
 
 
 @app.get("/health")
@@ -174,3 +181,33 @@ def get_npc_state(npc_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"Unknown NPC: {npc_key}")
 
     return {"npc": npc_key, "state": npc_state}
+
+
+@app.post("/reset/dialogue")
+def reset_dialogue_endpoint() -> dict[str, Any]:
+    """Debug endpoint: forget active conversations, preserve long-term memory."""
+    try:
+        with turn_lock:
+            return reset_dialogue(game)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Dialogue reset failed: {exc}",
+        ) from exc
+
+
+@app.post("/reset/all")
+def reset_all_endpoint(data: ResetRequest) -> dict[str, Any]:
+    """Debug endpoint: destructive new game reset. Do not expose publicly."""
+    location = data.location.strip().lower() if data.location else None
+    if location is not None and location not in ALLOWED_LOCATIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported location: {location}")
+
+    try:
+        with turn_lock:
+            return reset_all(game, location=location)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Full reset failed: {exc}",
+        ) from exc

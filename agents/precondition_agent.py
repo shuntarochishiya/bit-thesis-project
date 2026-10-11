@@ -1,3 +1,4 @@
+
 from typing import Dict, Any, Optional
 
 
@@ -5,14 +6,11 @@ class PreconditionAgent:
     """
     Checks preconditions before the main action is executed.
 
-    Besides ordinary location/resource/health checks, this agent now enforces
-    NPC presence. A player may only interact with an NPC that is physically
-    available at the current location.
+    Besides ordinary location/resource/health checks, this agent enforces
+    NPC presence. The prototype_hub location is a Unity integration/demo
+    location where both current NPCs are physically present.
     """
 
-    # Current prototype world placement.
-    # This is intentionally deterministic and can later be moved to world data
-    # or Unity scene metadata without changing the validation API.
     NPC_LOCATIONS = {
         "merchant": {"village", "town", "market", "prototype_hub"},
         "bartender": {"tavern", "prototype_hub"},
@@ -34,15 +32,11 @@ class PreconditionAgent:
     ) -> bool:
         target = str(target or "").strip().lower()
 
-        # Enemies are governed by combat/current-enemy state rather than a
-        # fixed settlement location in this prototype.
         if target in {"", "enemy"}:
             return True
 
         allowed_locations = cls.NPC_LOCATIONS.get(target)
         if not allowed_locations:
-            # Unknown/dynamic NPCs are not rejected here; Unity/world data can
-            # later provide their presence explicitly.
             return True
 
         location = cls._normalized_location(game_state)
@@ -57,28 +51,41 @@ class PreconditionAgent:
     ) -> Dict[str, Any]:
         text = player_input.lower()
         location = self._normalized_location(game_state)
+        target = str(target or "").strip().lower()
 
         if intent == "tavern_action":
-            tavern_words = [
-                "tavern", "inn", "pub", "bar", "alehouse",
-                "bartender", "barmaid", "barman", "innkeeper", "barkeep"
-            ]
+            # Explicit scene travel is separate from ordering a drink.
+            entering = any(phrase in text for phrase in (
+                "enter tavern", "enter the tavern", "enter inn",
+                "enter the inn", "go to the tavern", "walk into the tavern",
+            ))
+            leaving = any(phrase in text for phrase in (
+                "leave tavern", "leave the tavern", "exit tavern",
+                "exit the tavern", "leave the inn", "exit the inn",
+            ))
 
-            player_is_entering_tavern = any(word in text for word in tavern_words)
+            if not entering and not leaving:
+                if location not in {"tavern", "prototype_hub"}:
+                    return {
+                        "success": False,
+                        "message": "Tavern services are not available at this location.",
+                        "state_updates": {},
+                        "precondition_type": "location",
+                    }
 
-            if location != "tavern" and not player_is_entering_tavern:
-                return {
-                    "success": False,
-                    "message": "The player is not in a tavern, so this tavern action cannot be performed.",
-                    "state_updates": {},
-                    "precondition_type": "location"
-                }
+                if target != "bartender":
+                    return {
+                        "success": False,
+                        "message": "Tavern services must be requested from the bartender.",
+                        "state_updates": {},
+                        "precondition_type": "target",
+                    }
 
         return {
             "success": True,
             "message": "Location precondition passed.",
             "state_updates": {},
-            "precondition_type": "location"
+            "precondition_type": "location",
         }
 
     def check_player_resources(
@@ -123,8 +130,6 @@ class PreconditionAgent:
     ) -> Dict[str, Any]:
         target = str(target or "").strip().lower()
 
-        # Presence is checked here because dialogue/combat DAGs already call
-        # check_target_status. No new DAG node is required.
         interaction_intents = {
             "dialogue_action",
             "persuasion_action",

@@ -1,6 +1,8 @@
+
 from __future__ import annotations
 
 from typing import Any
+import re
 
 from config import (
     create_llm,
@@ -236,6 +238,7 @@ class OrchestrationAgent:
             intent=intent,
             target=target,
             current_context=current_context,
+            game_state=state_before,
         )
 
         self.execution_logger.set_intent(
@@ -352,88 +355,55 @@ class OrchestrationAgent:
         intent: str,
         target: str | None,
         current_context: dict[str, Any],
+        game_state: dict[str, Any] | None = None,
     ) -> tuple[str, str | None]:
-        """
-        Minimal compatibility fallback.
+        """Allow explicit tavern purchases where the bartender is present.
 
-        The old implementation forced rumors, information and dialogue
-        requests into tavern_action. This method intentionally does not.
-
-        Only unrecognized tavern service requests are converted into
-        tavern_action. Unrecognized bartender interaction becomes
-        dialogue_action.
+        The Unity prototype_hub contains both merchant and bartender, so
+        the selected NPC is authoritative. Mentioning a drink in conversation
+        must not automatically purchase it.
         """
-        if intent != "general_action":
+        if intent not in {"general_action", "dialogue_action"}:
             return intent, target
 
-        active_location = str(
-            current_context.get("active_location", "")
+        state = game_state or {}
+        location = str(
+            state.get("location")
+            or current_context.get("active_location")
+            or ""
         ).strip().lower()
 
-        if active_location != "tavern":
+        if location not in {"tavern", "prototype_hub"}:
             return intent, target
 
-        text = player_input.lower()
+        # Never redirect an interaction with the merchant to the bartender.
+        if target not in {None, "bartender"}:
+            return intent, target
+        if target is None and location != "tavern":
+            return intent, target
 
-        tavern_service_words = {
-            "drink",
-            "ale",
-            "beer",
-            "wine",
-            "mead",
-            "liquor",
-            "water",
-            "glass",
-            "cup",
-            "bottle",
-            "room",
-            "rent",
-            "food",
-            "meal",
-            "eat",
-            "dinner",
-            "lunch",
-            "rest",
-            "sleep",
-            "order",
-            "buy",
-            "purchase",
-            "leave tavern",
-            "leave the tavern",
-            "exit tavern",
-            "exit the tavern",
-        }
+        text = player_input.strip().lower()
+        drink_nouns = (
+            r"drink|ale|beer|wine|mead|water|liquor|"
+            r"glass|cup|mug|bottle"
+        )
+        request_phrases = (
+            r"\b(?:order|buy|purchase|serve|pour)\b|"
+            r"\b(?:get me|give me|bring me|ask for)\b|"
+            r"\b(?:can i have|could i have|may i have)\b|"
+            r"\b(?:i want|i'd like|i would like|i'll have)\b"
+        )
+        is_drink_order = bool(
+            re.search(rf"\b(?:{drink_nouns})\b", text)
+            and re.search(request_phrases, text)
+        )
 
-        dialogue_words = {
-            "talk",
-            "speak",
-            "ask",
-            "tell",
-            "say",
-            "greet",
-            "hello",
-            "hi",
-            "rumor",
-            "rumour",
-            "information",
-            "news",
-            "anything interesting",
-            "heard anything",
-            "know anything",
-            "tell me more",
-            "more details",
-            "explain",
-            "what happened",
-        }
-
-        if self._contains_any(text, tavern_service_words):
+        if is_drink_order:
             return "tavern_action", "bartender"
 
-        if (
-            target == "bartender"
-            or self._contains_any(text, dialogue_words)
-        ):
-            return "dialogue_action", target or "bartender"
+        # Unrecognized bartender speech remains free dialogue.
+        if intent == "general_action" and target == "bartender":
+            return "dialogue_action", "bartender"
 
         return intent, target
 
