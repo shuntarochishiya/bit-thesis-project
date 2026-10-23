@@ -1,4 +1,6 @@
-from typing import Dict, Any, List, Set
+
+from typing import Dict, Any, List, Set, Callable
+from concurrent.futures import ThreadPoolExecutor
 
 
 class DAGScheduler:
@@ -144,3 +146,61 @@ class DAGScheduler:
             })
 
         return formatted_levels
+
+
+    def execute_level(
+        self,
+        level: List[Dict[str, Any]],
+        run_task: Callable[[Dict[str, Any]], Any],
+        max_workers: int = 4,
+    ) -> Dict[str, Any]:
+        """
+        Execute a DAG level.
+
+        Parallel execution is permitted only when every task
+        explicitly declares parallel_safe=True.
+
+        Otherwise tasks execute sequentially to protect shared
+        game state and execution context.
+        """
+        if max_workers < 1:
+            raise ValueError("max_workers must be at least 1")
+
+        task_ids = [task["task_id"] for task in level]
+
+        if len(task_ids) != len(set(task_ids)):
+            raise ValueError(
+                "Duplicate task_id in execution level"
+            )
+
+        if not level:
+            return {}
+
+        parallel = (
+            len(level) > 1
+            and max_workers > 1
+            and all(
+                task.get("parallel_safe") is True
+                for task in level
+            )
+        )
+
+        if not parallel:
+            return {
+                task["task_id"]: run_task(task)
+                for task in level
+            }
+
+        with ThreadPoolExecutor(
+            max_workers=min(max_workers, len(level))
+        ) as pool:
+
+            futures = [
+                pool.submit(run_task, task)
+                for task in level
+            ]
+
+            return {
+                task["task_id"]: future.result()
+                for task, future in zip(level, futures)
+            }

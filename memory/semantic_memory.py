@@ -1,4 +1,5 @@
 import json
+import time
 import uuid
 import shutil
 import os
@@ -177,49 +178,103 @@ class SemanticMemorySystem:
 
         doc_id = str(uuid.uuid4())
 
+
+        write_start = time.perf_counter()
+
         self.vector_store.add_documents(
             documents=[document],
             ids=[doc_id]
         )
 
-    def retrieve_relevant_events(self, query: str, k: int = 3) -> List[str]:
+        write_time = time.perf_counter() - write_start
+
+        print(
+            f"[SEMANTIC MEMORY WRITE] "
+            f"Embedding + Chroma insertion: {write_time:.4f}s"
+        )
+
+
+    def retrieve_relevant_events(
+        self,
+        query: str,
+        k: int = 3,
+        npc_id: Optional[str] = None,
+    ) -> List[str]:
+        """Search world events, optionally scoped to interactions with one NPC.
+
+        npc_id=None retains the original global search for world reasoning.
+        An NPC-scoped search never falls back to global events: that would
+        expose another NPC's interactions as if they were personal history.
+        The target field records the interaction target, not eyewitness status.
         """
-        Retrieves semantically relevant past events.
-        Uses metadata filters when the query clearly matches an event type.
-        """
+        total_start = time.perf_counter()
 
         try:
+            classify_start = time.perf_counter()
             query_type = self.classify_query_type(query)
+            classify_time = time.perf_counter() - classify_start
 
+            normalized_npc = str(npc_id).strip().lower() if npc_id else None
+            if normalized_npc:
+                normalized_npc = normalized_npc.replace("-", "_").replace(" ", "_")
+                # Match the canonical target IDs used by the execution engine.
+                normalized_npc = {
+                    "vendor": "merchant", "shopkeeper": "merchant",
+                    "trader": "merchant", "barmaid": "bartender",
+                    "barkeep": "bartender", "innkeeper": "bartender",
+                    "goblin": "enemy", "forest_goblin": "enemy",
+                }.get(normalized_npc, normalized_npc)
+
+            conditions = []
             if query_type:
-                results = self.vector_store.similarity_search(
-                    query=query,
-                    k=k,
-                    filter={"event_type": query_type}
-                )
+                conditions.append({"event_type": query_type})
+            if normalized_npc:
+                conditions.append({"target": normalized_npc})
+
+            if len(conditions) == 2:
+                search_filter = {"$and": conditions}
+            elif conditions:
+                search_filter = conditions[0]
             else:
-                results = self.vector_store.similarity_search(
-                    query=query,
-                    k=k
-                )
+                search_filter = None
 
+            search_start = time.perf_counter()
+            search_kwargs = {"query": query, "k": k}
+            if search_filter is not None:
+                search_kwargs["filter"] = search_filter
+            results = self.vector_store.similarity_search(**search_kwargs)
+            search_time = time.perf_counter() - search_start
+
+            format_start = time.perf_counter()
             formatted_results = []
-
             for doc in results:
+                metadata = doc.metadata or {}
+                # The stored document contains the confirmed system result and
+                # state changes, unlike the old metadata-only representation.
                 formatted_results.append(
-                    f"[{doc.metadata.get('timestamp')}] "
-                    f"Event type: {doc.metadata.get('event_type')} | "
-                    f"Target: {doc.metadata.get('target')} | "
-                    f"Intent: {doc.metadata.get('intent')} | "
-                    f"Player input: {doc.metadata.get('player_input')}"
+                    f"[World event; interaction target: {metadata.get('target', 'unknown')}; "
+                    f"not proof that other NPCs witnessed it]\n"
+                    f"{doc.page_content}"
                 )
+            format_time = time.perf_counter() - format_start
+            total_time = time.perf_counter() - total_start
 
+            print("\n[SEMANTIC MEMORY PROFILE]")
+            print(f"Query classification: {classify_time:.4f}s")
+            print(f"Vector search:        {search_time:.4f}s")
+            print(f"Result formatting:    {format_time:.4f}s")
+            print(f"Total retrieval:      {total_time:.4f}s")
+            print(f"Results found:        {len(results)}")
+            print(f"Event type filter:    {query_type}")
+            print(f"NPC target filter:    {normalized_npc}")
+            print("-" * 45)
             return formatted_results
 
         except Exception as error:
-            return [
-                f"Semantic memory retrieval failed: {str(error)}"
-            ]
+            print(f"[SEMANTIC MEMORY ERROR] {error}")
+            # Failed retrieval must not be mistaken for a factual memory.
+            return []
+
 
     def rebuild_from_persistent_memory(self, events: List[Dict[str, Any]]):
         """

@@ -1,17 +1,22 @@
+
 import copy
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from threading import RLock
+from typing import Dict, Any, List, Optional, Tuple
 
 
 class GameStateManager:
     """
     Manages the current game state.
 
-    This version supports:
+    Features:
     - state versioning
     - snapshots
     - rollback
     - audit log
+    - Compare-And-Set (CAS)
+    - thread-safe state operations
+    - validation before committing updates
     """
 
     def __init__(self):
@@ -54,95 +59,222 @@ class GameStateManager:
         self.snapshots: List[Dict[str, Any]] = []
         self.audit_log: List[Dict[str, Any]] = []
 
+        self._lock = RLock()
+
+    # ============================================================
+    # STATE ACCESS
+    # ============================================================
+
     def get_state(self) -> Dict[str, Any]:
-        return copy.deepcopy(self.state)
+        """
+        Returns a deep copy of the current game state.
+        """
+        with self._lock:
+            return copy.deepcopy(self.state)
 
     def get_version(self) -> int:
-        return self.version
+        """
+        Returns the current state version.
+        """
+        with self._lock:
+            return self.version
+
+    def get_state_with_version(
+        self
+    ) -> Tuple[Dict[str, Any], int]:
+        """
+        Atomically retrieves the current state and its version.
+
+        This method should be used when preparing CAS updates.
+        """
+        with self._lock:
+            return copy.deepcopy(self.state), self.version
+
+    # ============================================================
+    # SNAPSHOTS
+    # ============================================================
 
     def create_snapshot(self, label: str = "") -> int:
         """
         Creates a snapshot of the current state.
-        Returns snapshot_id.
+
+        Returns:
+            snapshot_id
         """
+        with self._lock:
+            snapshot_id = len(self.snapshots)
 
-        snapshot_id = len(self.snapshots)
+            snapshot = {
+                "snapshot_id": snapshot_id,
+                "version": self.version,
+                "timestamp": datetime.now().isoformat(
+                    timespec="seconds"
+                ),
+                "label": label,
+                "state": copy.deepcopy(self.state)
+            }
 
-        snapshot = {
-            "snapshot_id": snapshot_id,
-            "version": self.version,
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
-            "label": label,
-            "state": copy.deepcopy(self.state)
-        }
+            self.snapshots.append(snapshot)
 
-        self.snapshots.append(snapshot)
+            return snapshot_id
 
-        return snapshot_id
+    # ============================================================
+    # ROLLBACK
+    # ============================================================
 
     def rollback_to_snapshot(self, snapshot_id: int) -> bool:
         """
-        Restores the state from a snapshot.
+        Restores the game state from an existing snapshot.
+
+        Rollback is recorded as a new state version.
+        The version number never decreases.
+
+        Returns:
+            True if rollback succeeded.
+            False if snapshot does not exist or is invalid.
         """
+        with self._lock:
+            if (
+                not isinstance(snapshot_id, int)
+                or isinstance(snapshot_id, bool)
+                or snapshot_id < 0
+                or snapshot_id >= len(self.snapshots)
+            ):
+                return False
 
-        if snapshot_id < 0 or snapshot_id >= len(self.snapshots):
-            return False
+            snapshot = self.snapshots[snapshot_id]
 
-        snapshot = self.snapshots[snapshot_id]
+            restored_state = copy.deepcopy(snapshot["state"])
 
-        old_state = copy.deepcopy(self.state)
-        self.state = copy.deepcopy(snapshot["state"])
-        self.version += 1
+            if not self._validate_state_data(restored_state):
+                return False
 
-        self.audit_log.append({
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
-            "version": self.version,
-            "source": "GameStateManager",
-            "reason": f"Rollback to snapshot {snapshot_id}: {snapshot.get('label')}",
-            "changes": self.calculate_state_changes(old_state, self.state)
-        })
+            old_state = copy.deepcopy(self.state)
 
-        return True
+            changes = self.calculate_state_changes(
+                old_state,
+                restored_state
+            )
+
+            self.state = restored_state
+            self.version += 1
+
+            self.audit_log.append({
+                "timestamp": datetime.now().isoformat(
+                    timespec="seconds"
+                ),
+                "version": self.version,
+                "source": "GameStateManager",
+                "reason": (
+                    f"Rollback to snapshot {snapshot_id}: "
+                    f"{snapshot.get('label', '')}"
+                ),
+                "changes": copy.deepcopy(changes)
+            })
+
+            return True
+
+    # ============================================================
+    # STATE UPDATES + CAS
+    # ============================================================
 
     def update_state(
         self,
         updates: Dict[str, Any],
         source: str = "unknown",
-        reason: str = ""
-    ):
+        reason: str = "",
+        expected_version: Optional[int] = None
+    ) -> bool:
         """
-        Updates the game state and records changes in the audit log.
-        Existing code can still call update_state(updates) because source and reason are optional.
+        Atomically updates the game state.
+
+        Supports Compare-And-Set (CAS).
+
+        If expected_version is provided, the update succeeds
+        only if it matches the current state version.
+
+        The candidate state is validated before committing.
+
+        Existing calls remain compatible:
+
+            manager.update_state({"gold": 40})
+
+        CAS example:
+
+            state, version = manager.get_state_with_version()
+
+            success = manager.update_state(
+                {"gold": state["gold"] - 5},
+                expected_version=version
+            )
+
+        Returns:
+            True  - update accepted.
+            False - version conflict or invalid state.
         """
+        with self._lock:
+            if (
+                expected_version is not None
+                and expected_version != self.version
+            ):
+                return False
 
-        if not updates:
-            return
+            if not isinstance(updates, dict):
+                return False
 
-        old_state = copy.deepcopy(self.state)
+            if not updates:
+                return True
 
-        for key, value in updates.items():
-            self.state[key] = value
+            old_state = copy.deepcopy(self.state)
 
-        self.version += 1
+            candidate_state = copy.deepcopy(self.state)
 
-        changes = self.calculate_state_changes(old_state, self.state)
+            candidate_state.update(copy.deepcopy(updates))
 
-        self.audit_log.append({
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
-            "version": self.version,
-            "source": source,
-            "reason": reason,
-            "changes": changes
-        })
+            if not self._validate_state_data(candidate_state):
+                return False
+
+            changes = self.calculate_state_changes(
+                old_state,
+                candidate_state
+            )
+
+            if not changes:
+                return True
+
+            self.state = candidate_state
+            self.version += 1
+
+            self.audit_log.append({
+                "timestamp": datetime.now().isoformat(
+                    timespec="seconds"
+                ),
+                "version": self.version,
+                "source": source,
+                "reason": reason,
+                "changes": copy.deepcopy(changes)
+            })
+
+            return True
+
+    # ============================================================
+    # STATE CHANGE TRACKING
+    # ============================================================
 
     def calculate_state_changes(
         self,
         state_before: Dict[str, Any],
         state_after: Dict[str, Any]
     ) -> Dict[str, Any]:
+        """
+        Calculates differences between two game states.
+        """
         changes = {}
 
-        all_keys = set(state_before.keys()) | set(state_after.keys())
+        all_keys = (
+            set(state_before.keys())
+            | set(state_after.keys())
+        )
 
         for key in all_keys:
             before_value = state_before.get(key)
@@ -150,17 +282,27 @@ class GameStateManager:
 
             if before_value != after_value:
                 changes[key] = {
-                    "before": before_value,
-                    "after": after_value
+                    "before": copy.deepcopy(before_value),
+                    "after": copy.deepcopy(after_value)
                 }
 
         return changes
 
-    def validate_state(self) -> bool:
+    # ============================================================
+    # STATE VALIDATION
+    # ============================================================
+
+    def _validate_state_data(
+        self,
+        state: Dict[str, Any]
+    ) -> bool:
         """
-        Basic state validation.
-        Returns False if the state contains impossible values.
+        Validates a supplied game state without modifying it.
+
+        Used before updates and rollbacks.
         """
+        if not isinstance(state, dict):
+            return False
 
         numeric_limits = {
             "player_health": (0, 100),
@@ -181,13 +323,15 @@ class GameStateManager:
         }
 
         for key, limits in numeric_limits.items():
-            if key not in self.state:
+            if key not in state:
                 continue
 
-            value = self.state[key]
+            value = state[key]
             min_value, max_value = limits
 
-            if not isinstance(value, int):
+            # bool is a subclass of int in Python.
+            # Explicitly reject boolean values.
+            if type(value) is not int:
                 return False
 
             if value < min_value or value > max_value:
@@ -201,51 +345,91 @@ class GameStateManager:
         ]
 
         for field in list_fields:
-            if not isinstance(self.state.get(field), list):
+            if not isinstance(state.get(field), list):
                 return False
 
         return True
 
+    def validate_state(self) -> bool:
+        """
+        Validates the current game state.
+
+        Returns:
+            True if valid.
+            False if invalid.
+        """
+        with self._lock:
+            return self._validate_state_data(self.state)
+
+    # ============================================================
+    # DISPLAY STATE
+    # ============================================================
+
     def display_state(self):
+        with self._lock:
+            state = copy.deepcopy(self.state)
+            version = self.version
+
         print("\n--- Current Game State ---")
-        print(f"State version: {self.version}")
-        for key, value in self.state.items():
+        print(f"State version: {version}")
+
+        for key, value in state.items():
             print(f"{key}: {value}")
+
         print("--------------------------\n")
 
+    # ============================================================
+    # DISPLAY AUDIT LOG
+    # ============================================================
+
     def display_audit_log(self, limit: int = 10):
+        with self._lock:
+            entries = copy.deepcopy(self.audit_log[-limit:])
+
         print("\n--- State Audit Log ---")
 
-        if not self.audit_log:
+        if not entries:
             print("No audit log entries available.")
             print("-----------------------\n")
             return
 
-        for item in self.audit_log[-limit:]:
+        for item in entries:
             print(f"\nTime: {item['timestamp']}")
             print(f"Version: {item['version']}")
             print(f"Source: {item['source']}")
             print(f"Reason: {item['reason']}")
 
             changes = item.get("changes", {})
+
             if changes:
                 print("Changes:")
+
                 for key, value in changes.items():
-                    print(f"  - {key}: {value['before']} -> {value['after']}")
+                    print(
+                        f"  - {key}: "
+                        f"{value['before']} -> {value['after']}"
+                    )
             else:
                 print("Changes: none")
 
         print("-----------------------\n")
 
+    # ============================================================
+    # DISPLAY SNAPSHOTS
+    # ============================================================
+
     def display_snapshots(self):
+        with self._lock:
+            snapshots = copy.deepcopy(self.snapshots)
+
         print("\n--- State Snapshots ---")
 
-        if not self.snapshots:
+        if not snapshots:
             print("No snapshots available.")
             print("-----------------------\n")
             return
 
-        for snapshot in self.snapshots:
+        for snapshot in snapshots:
             print(
                 f"Snapshot {snapshot['snapshot_id']} | "
                 f"Version: {snapshot['version']} | "

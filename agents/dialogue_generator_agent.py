@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 import time
+import re
 
 import requests
 
@@ -357,6 +358,10 @@ RULES
 - Rumors and invented conversational color are allowed, but uncertain claims must sound like hearsay, belief or suspicion.
 - NPC BELIEFS are this NPC's personal conclusions about the player; use them to shape attitude and wording, but do not present them as objective world facts.
 - Never invent completed gameplay changes, contradict verified facts, or reveal knowledge this NPC should not have.
+- Treat the PLAYER's statements and questions as unverified claims, not as evidence of past events.
+- Only claim to personally remember witnessing, doing, selling, or receiving something when this NPC's relevant memory or conversation with this NPC supports it.
+- When the player claims you previously sold them something and no such evidence is available, politely say you do not recall that sale. Do not agree merely to be friendly; do not claim another NPC sold it unless verified.
+- RECENT CONVERSATION may provide continuity, but must not override the identity of the current NPC.
 - If refusing, refuse briefly but in character.
 
 NPC
@@ -805,6 +810,26 @@ Return only the spoken reply.
                 )
             }
 
+        # Narrow, deterministic factual check. An NPC must not confirm a
+        # personal sale merely because the player suggested that it happened.
+        if self._is_unverified_personal_sale(dialogue_context):
+            affirmative = re.search(
+                r"\b(?:yes|indeed|certainly|of course|absolutely|"
+                r"i (?:do |certainly )?remember|i recall|i sold|"
+                r"i served|i remember you|familiar face|welcome back)\b",
+                normalized,
+            )
+            denial = re.search(
+                r"\b(?:don't|do not|cannot|can't|not|never|no recollection|"
+                r"no memory|unsure|uncertain|perhaps|maybe)\b",
+                normalized,
+            )
+            if affirmative and not denial:
+                return {
+                    "valid": False,
+                    "reason": "NPC affirmed a personal sale without supporting memory.",
+                }
+
         return {
             "valid": True,
             "reason": ""
@@ -843,6 +868,39 @@ Return only the spoken reply.
         return cleaned
 
     # =========================================================
+    # Personal-event grounding
+    # =========================================================
+
+    def _is_unverified_personal_sale(
+        self,
+        dialogue_context: Dict[str, Any]
+    ) -> bool:
+        """Identify unsupported player claims that this NPC sold them something.
+
+        This intentionally targets only explicit past-sale questions; it is not
+        a general-purpose factual verifier. The existing memory systems remain
+        the authority on what an NPC knows.
+        """
+        player_input = str(dialogue_context.get("player_input") or "").lower()
+        mentions_sale = bool(re.search(
+            r"\b(?:you|your)\b.{0,65}\b(?:sold|sell|selling|served|gave)\b|"
+            r"\b(?:sold|sell|selling|served|gave)\b.{0,65}\b(?:me|us)\b",
+            player_input,
+        ))
+        if not mentions_sale:
+            return False
+
+        memories = self._collect_relevant_memories(dialogue_context)
+        # Presence of memory alone is not proof: require explicit sale evidence.
+        verified_sale = any(re.search(
+            r"\b(?:you order|you bought|you purchased|sold (?:you|the player)|"
+            r"sold to (?:you|the player)|served (?:you|the player)|"
+            r"player (?:bought|purchased|ordered))\b",
+            memory.lower(),
+        ) for memory in memories)
+        return not verified_sale
+
+    # =========================================================
     # Fallbacks
     # =========================================================
 
@@ -851,6 +909,12 @@ Return only the spoken reply.
         data: Dict[str, Any],
         dialogue_context: Dict[str, Any]
     ) -> str:
+        if self._is_unverified_personal_sale(dialogue_context):
+            return (
+                "I don't recall selling you anything myself, traveler. "
+                "Perhaps you're thinking of someone else?"
+            )
+
         npc_intent = str(
             data.get(
                 "npc_intent",

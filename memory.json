@@ -1,72 +1,22 @@
 [
   {
-    "timestamp": "2026-10-08T19:28:14",
-    "player_input": "hello",
-    "intent": "dialogue_action",
-    "target": "bartender",
-    "system_result": "Greetings, traveler! A seat and a warm welcome to you in our humble establishment. The tales I've heard of your deeds are many, but here they speak of an adventurer with a keen eye for mystery, and perhaps the odd dragon slaying or two. Care for something strong? Or do you seek solace in our more mellow brews?",
-    "state_changes": {},
-    "important_state": {
-      "merchant_health": 100,
-      "merchant_hostile": false,
-      "relationship_with_merchant": 50,
-      "bartender_health": 100,
-      "bartender_hostile": false,
-      "relationship_with_bartender": 50,
-      "bartender_mood": "neutral",
-      "bartender_role": "bartender",
-      "bartender_gender": "unknown",
-      "bartender_pronouns": "they/them",
-      "tavern_reputation": 50,
-      "player_reputation": 50,
-      "enemy_health": 60,
-      "location": "prototype_hub",
-      "world_mood": "mysterious"
-    }
-  },
-  {
-    "timestamp": "2026-10-08T19:28:34",
-    "player_input": "I want a cup of a mead",
+    "timestamp": "2026-10-22T15:28:06",
+    "player_input": "I would like to order an ale.",
     "intent": "tavern_action",
     "target": "bartender",
-    "system_result": "The player is not in a tavern, so this tavern action cannot be performed.",
-    "state_changes": {},
-    "important_state": {
-      "merchant_health": 100,
-      "merchant_hostile": false,
-      "relationship_with_merchant": 50,
-      "bartender_health": 100,
-      "bartender_hostile": false,
-      "relationship_with_bartender": 50,
-      "bartender_mood": "neutral",
-      "bartender_role": "bartender",
-      "bartender_gender": "unknown",
-      "bartender_pronouns": "they/them",
-      "tavern_reputation": 50,
-      "player_reputation": 50,
-      "enemy_health": 60,
-      "location": "prototype_hub",
-      "world_mood": "mysterious"
-    }
-  },
-  {
-    "timestamp": "2026-10-08T19:45:33",
-    "player_input": "I want a mug of mead",
-    "intent": "tavern_action",
-    "target": "bartender",
-    "system_result": "You order mead for 5 coins. You now have 45 coins.",
+    "system_result": "You order ale for 2 coins. You now have 48 coins.",
     "state_changes": {
+      "gold": {
+        "before": 50,
+        "after": 48
+      },
       "bartender_mood": {
         "before": "neutral",
-        "after": "cheerful"
+        "after": "warm"
       },
       "world_mood": {
         "before": "mysterious",
         "after": "warm"
-      },
-      "gold": {
-        "before": 50,
-        "after": 45
       },
       "relationship_with_bartender": {
         "before": 50,
@@ -80,7 +30,520 @@
       "bartender_health": 100,
       "bartender_hostile": false,
       "relationship_with_bartender": 51,
+      "bartender_mood": "warm",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "prototype_hub",
+      "world_mood": "warm"
+    }
+  },
+  {
+    "timestamp": "2026-10-22T15:31:50",
+    "player_input": "I would like to order a beer.",
+    "intent": "tavern_action",
+    "target": "bartender",
+    "system_result": "You order beer for 3 coins. You now have 47 coins.",
+    "state_changes": {
+      "relationship_with_bartender": {
+        "before": 50,
+        "after": 51
+      },
+      "bartender_mood": {
+        "before": "neutral",
+        "after": "warm"
+      },
+      "world_mood": {
+        "before": "mysterious",
+        "after": "warm"
+      },
+      "gold": {
+        "before": 50,
+        "after": 47
+      }
+    },
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 51,
+      "bartender_mood": "warm",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "prototype_hub",
+      "world_mood": "warm"
+    }
+  },
+  {
+    "timestamp": "2026-10-22T15:38:41",
+    "player_input": "I would like to order wine.",
+    "intent": "tavern_action",
+    "target": "bartender",
+    "system_result": "You order wine for 6 coins. You now have 44 coins.",
+    "state_changes": {
+      "world_mood": {
+        "before": "mysterious",
+        "after": "warm"
+      },
+      "relationship_with_bartender": {
+        "before": 50,
+        "after": 51
+      },
+      "bartender_mood": {
+        "before": "neutral",
+        "after": "refined"
+      },
+      "gold": {
+        "before": 50,
+        "after": 44
+      }
+    },
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 51,
+      "bartender_mood": "refined",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "prototype_hub",
+      "world_mood": "warm"
+    }
+  },
+  {
+    "timestamp": "2026-10-22T15:38:46",
+    "player_input": "I would like to order wine.",
+    "intent": "tavern_action",
+    "target": "bartender",
+    "system_result": "You order wine for 6 coins. You now have 38 coins.",
+    "state_changes": {
+      "relationship_with_bartender": {
+        "before": 51,
+        "after": 52
+      },
+      "gold": {
+        "before": 44,
+        "after": 38
+      }
+    },
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 52,
+      "bartender_mood": "refined",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "prototype_hub",
+      "world_mood": "warm"
+    }
+  },
+  {
+    "timestamp": "2026-10-22T16:11:01",
+    "player_input": "Hello! How you've been lately?",
+    "intent": "dialogue_action",
+    "target": "bartender",
+    "system_result": "Greetings, traveler! I'm always findin' myself a bit busier these days, what with all the stories swirling 'round this tavern. But it keeps me on my toes and the ale flowing, so no complaints here. How about you? What brings you to our humble establishment today?",
+    "state_changes": {},
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 50,
+      "bartender_mood": "neutral",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "prototype_hub",
+      "world_mood": "mysterious"
+    }
+  },
+  {
+    "timestamp": "2026-10-22T16:11:33",
+    "player_input": "I want to buy a drink",
+    "intent": "tavern_action",
+    "target": "bartender",
+    "system_result": "You order ale for 2 coins. You now have 48 coins.",
+    "state_changes": {
+      "gold": {
+        "before": 50,
+        "after": 48
+      },
+      "relationship_with_bartender": {
+        "before": 50,
+        "after": 51
+      },
+      "bartender_mood": {
+        "before": "neutral",
+        "after": "warm"
+      },
+      "world_mood": {
+        "before": "mysterious",
+        "after": "warm"
+      }
+    },
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 51,
+      "bartender_mood": "warm",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "prototype_hub",
+      "world_mood": "warm"
+    }
+  },
+  {
+    "timestamp": "2026-10-22T16:12:27",
+    "player_input": "Do you remember me? I bought a drink here earlier",
+    "intent": "dialogue_action",
+    "target": "bartender",
+    "system_result": "Ah, traveler! It's good to see a familiar face in this bustling inn. You did indeed partake of some fine ale not too long ago. Settle down, I'll have another round ready for you in no time!",
+    "state_changes": {
+      "bartender_mood": {
+        "before": "warm",
+        "after": "neutral"
+      }
+    },
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 51,
+      "bartender_mood": "neutral",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "prototype_hub",
+      "world_mood": "warm"
+    }
+  },
+  {
+    "timestamp": "2026-10-22T16:13:29",
+    "player_input": "Can you help me? I need some info",
+    "intent": "dialogue_action",
+    "target": "bartender",
+    "system_result": "You've certainly caught my ear, traveler! What sort of information are you after? A rumor on the whispers about the Dragon's Den? Or perhaps a local gossip on the gold-digging lass at the market square? I'm no storyteller like old Baelin, but I've got ears in more places than you might think.",
+    "state_changes": {},
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 51,
+      "bartender_mood": "neutral",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "prototype_hub",
+      "world_mood": "warm"
+    }
+  },
+  {
+    "timestamp": "2026-10-22T16:15:01",
+    "player_input": "Hello! Can you help me? I need some info",
+    "intent": "dialogue_action",
+    "target": "merchant",
+    "system_result": "Greetings, traveler! Of course, I'd be happy to assist you. Have you heard rumors of a rare artifact being traded in the city lately? Some say it grants incredible power, but I must warn you, such things seldom come cheap and can attract unwanted attention.",
+    "state_changes": {},
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 51,
+      "bartender_mood": "neutral",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "prototype_hub",
+      "world_mood": "warm"
+    }
+  },
+  {
+    "timestamp": "2026-10-23T14:20:48",
+    "player_input": "I would like to order mead.",
+    "intent": "tavern_action",
+    "target": "bartender",
+    "system_result": "You order mead for 5 coins. You now have 45 coins.",
+    "state_changes": {
+      "gold": {
+        "before": 50,
+        "after": 45
+      },
+      "relationship_with_bartender": {
+        "before": 50,
+        "after": 51
+      },
+      "bartender_mood": {
+        "before": "neutral",
+        "after": "cheerful"
+      },
+      "world_mood": {
+        "before": "mysterious",
+        "after": "warm"
+      }
+    },
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 51,
       "bartender_mood": "cheerful",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "prototype_hub",
+      "world_mood": "warm"
+    }
+  },
+  {
+    "timestamp": "2026-10-23T14:21:21",
+    "player_input": "Hello! You remember me? I ordered a drink here not so long ago",
+    "intent": "dialogue_action",
+    "target": "bartender",
+    "system_result": "I am listening. What exactly do you want to know?",
+    "state_changes": {
+      "bartender_mood": {
+        "before": "cheerful",
+        "after": "neutral"
+      }
+    },
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 51,
+      "bartender_mood": "neutral",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "prototype_hub",
+      "world_mood": "warm"
+    }
+  },
+  {
+    "timestamp": "2026-10-23T14:21:38",
+    "player_input": "Hello! You remember me? I ordered a drink here not so long ago",
+    "intent": "dialogue_action",
+    "target": "bartender",
+    "system_result": "I am listening. What exactly do you want to know?",
+    "state_changes": {},
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 51,
+      "bartender_mood": "neutral",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "prototype_hub",
+      "world_mood": "warm"
+    }
+  },
+  {
+    "timestamp": "2026-10-23T14:24:14",
+    "player_input": "Hello! You remember me? I ordered a drink here not so long ago",
+    "intent": "dialogue_action",
+    "target": "bartender",
+    "system_result": "Ah, yes! A familiar face indeed. Welcome back to the Hollow Oak Tavern. It's been some time since your last round. What can I get you tonight, my friend?",
+    "state_changes": {},
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 51,
+      "bartender_mood": "neutral",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "prototype_hub",
+      "world_mood": "warm"
+    }
+  },
+  {
+    "timestamp": "2026-10-23T14:25:18",
+    "player_input": "Hello! Do you remember me? I ordered mead here earlier.",
+    "intent": "dialogue_action",
+    "target": "merchant",
+    "system_result": "Ah, indeed! A familiar face and a delightful choice of beverage. Settle down for a moment, friend, and let's see if I can help you with your query today. What brings you back so soon?",
+    "state_changes": {},
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 51,
+      "bartender_mood": "neutral",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "prototype_hub",
+      "world_mood": "warm"
+    }
+  },
+  {
+    "timestamp": "2026-10-23T14:32:08",
+    "player_input": "I would like to order wine.",
+    "intent": "tavern_action",
+    "target": "bartender",
+    "system_result": "You order wine for 6 coins. You now have 44 coins.",
+    "state_changes": {
+      "relationship_with_bartender": {
+        "before": 50,
+        "after": 51
+      },
+      "bartender_mood": {
+        "before": "neutral",
+        "after": "refined"
+      },
+      "gold": {
+        "before": 50,
+        "after": 44
+      },
+      "world_mood": {
+        "before": "mysterious",
+        "after": "warm"
+      }
+    },
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 51,
+      "bartender_mood": "refined",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "prototype_hub",
+      "world_mood": "warm"
+    }
+  },
+  {
+    "timestamp": "2026-10-23T14:33:42",
+    "player_input": "Hello! Do you remember selling me a drink?",
+    "intent": "dialogue_action",
+    "target": "bartender",
+    "system_result": "Yes, I certainly do recall serving you a drink on my last visit here. The Hollow Oak Tavern welcomes familiar faces with open arms and glasses half-full of your preferred tipple. What might you be in the mood for tonight?",
+    "state_changes": {
+      "relationship_with_bartender": {
+        "before": 51,
+        "after": 49
+      },
+      "bartender_mood": {
+        "before": "refined",
+        "after": "neutral"
+      }
+    },
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 49,
+      "bartender_mood": "neutral",
+      "bartender_role": "bartender",
+      "bartender_gender": "unknown",
+      "bartender_pronouns": "they/them",
+      "tavern_reputation": 50,
+      "player_reputation": 50,
+      "enemy_health": 60,
+      "location": "prototype_hub",
+      "world_mood": "warm"
+    }
+  },
+  {
+    "timestamp": "2026-10-23T14:35:35",
+    "player_input": "Hello! Do you remember selling me a drink?",
+    "intent": "dialogue_action",
+    "target": "merchant",
+    "system_result": "Ah, indeed! A familiar face and a delightful choice of beverage once more. You've certainly brightened up my day with your return. How may I serve you today?",
+    "state_changes": {},
+    "important_state": {
+      "merchant_health": 100,
+      "merchant_hostile": false,
+      "relationship_with_merchant": 50,
+      "bartender_health": 100,
+      "bartender_hostile": false,
+      "relationship_with_bartender": 49,
+      "bartender_mood": "neutral",
       "bartender_role": "bartender",
       "bartender_gender": "unknown",
       "bartender_pronouns": "they/them",

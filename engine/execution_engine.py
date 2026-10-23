@@ -1,4 +1,5 @@
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Callable
+import copy
 import time
 
 from state.game_state_manager import GameStateManager
@@ -95,26 +96,30 @@ class ExecutionEngine:
         updates: Dict[str, Any],
         source: str,
         reason: str,
-        snapshot_id: int
-    ):
-        """
-        Applies state updates and rolls back if the state becomes invalid.
-        """
+        snapshot_id: int,
+        expected_version: int | None = None,
+    ) -> None:
+        """Commit validated updates atomically using GameStateManager CAS.
 
+        The snapshot_id parameter is retained for compatibility with existing
+        callers. Rejected updates are never committed, so an automatic rollback
+        is not needed and could overwrite a concurrent successful update.
+        """
         if not updates:
             return
 
-        self.game_state_manager.update_state(
+        accepted = self.game_state_manager.update_state(
             updates,
             source=source,
-            reason=reason
+            reason=reason,
+            expected_version=expected_version,
         )
-
-        if not self.game_state_manager.validate_state():
-            self.game_state_manager.rollback_to_snapshot(snapshot_id)
-            raise Exception(
-                f"Invalid game state detected after update from {source}. "
-                f"Rolled back to snapshot {snapshot_id}."
+        if not accepted:
+            current_version = self.game_state_manager.get_state_with_version()[1]
+            raise RuntimeError(
+                f"State update rejected for {source}: CAS version conflict "
+                f"or invalid state (expected_version={expected_version}, "
+                f"current_version={current_version})."
             )
 
     @staticmethod
@@ -195,6 +200,20 @@ class ExecutionEngine:
         except Exception:
             return []
 
+    def _build_npc_dialogue_context(self, target: str | None) -> Dict[str, Any]:
+        """Provide the NPC's actual profile and runtime state to dialogue agents.
+
+        Unknown targets and optional NPC simulation do not interrupt the
+        existing deterministic dialogue fallback.
+        """
+        if self.npc_state_manager is None or not target:
+            return {}
+        try:
+            context = self.npc_state_manager.build_simulation_context(target)
+            return context if isinstance(context, dict) else {}
+        except (KeyError, ValueError):
+            return {}
+
     @staticmethod
     def _is_npc_apology(player_input: str) -> bool:
         """Return True when the player's dialogue is an explicit apology."""
@@ -248,12 +267,15 @@ class ExecutionEngine:
         )
         social_consequence["system_note"] = outcome_note
 
+        _, social_state_version = self.game_state_manager.get_state_with_version()
+
         dialogue_decision = self.dialogue_agent.execute(
             game_state=self.game_state_manager.get_state(),
             target=target,
             player_input=player_input,
             relevant_memory=relevant_memory,
             consequence_result=social_consequence,
+            npc_context=self._build_npc_dialogue_context(target),
         )
 
         dialogue_decision = self._attach_working_dialogue_memory(
@@ -288,6 +310,7 @@ class ExecutionEngine:
                 "Structured NPC social response",
             ),
             snapshot_id=snapshot_id,
+            expected_version=social_state_version,
         )
 
         return validated_result.get(
@@ -456,6 +479,35 @@ class ExecutionEngine:
         print(f"TOTAL TURN TIME: {total_seconds:.3f}s")
         print("-" * 72 + "\n")
 
+    def _run_precondition_check(
+        self,
+        task: Dict[str, Any],
+        game_state: Dict[str, Any],
+        player_input: str,
+        intent: str,
+        target: str,
+    ):
+        checks: Dict[
+            str,
+            Callable[[str, str, Dict[str, Any], str], Dict[str, Any]]
+        ] = {
+            "validate_location": self.precondition_agent.validate_location,
+            "check_player_resources": self.precondition_agent.check_player_resources,
+            "check_target_status": self.precondition_agent.check_target_status,
+        }
+
+        check_name = task.get("check")
+        check_function = checks.get(check_name)
+        if check_function is None:
+            raise ValueError(f"Unknown precondition check: {check_name}")
+        return check_function(
+            intent,
+            target,
+            game_state,
+            player_input,
+        )
+
+
     def execute_plan(
         self,
         plan: List[Dict[str, Any]],
@@ -560,6 +612,44 @@ class ExecutionEngine:
         }
 
         for level in execution_levels:
+            # Compute independent read-only preconditions concurrently.
+            # State and execution_context are only committed by the main thread.
+            safe_tasks = [
+                {**task, "parallel_safe": True}
+                for task in level
+                if task["agent"] == "precondition"
+            ]
+            prepared_preconditions: Dict[str, Any] = {}
+
+            if len(safe_tasks) >= 2:
+                level_state = self.game_state_manager.get_state()
+
+                def compute_precondition(task: Dict[str, Any]) -> Any:
+                    try:
+                        # Each worker receives an isolated snapshot so accidental
+                        # mutation cannot affect another worker's input.
+                        return self._run_precondition_check(
+                            task=task,
+                            game_state=copy.deepcopy(level_state),
+                            player_input=player_input,
+                            intent=intent,
+                            target=target,
+                        )
+                    except Exception as error:
+                        # Preserve the existing per-task fallback handling.
+                        return error
+
+                print(
+                    f"[DAG PARALLEL] Running "
+                    f"{len(safe_tasks)} independent tasks"
+                )
+
+                prepared_preconditions = self.dag_scheduler.execute_level(
+                    level=safe_tasks,
+                    run_task=compute_precondition,
+                    max_workers=4,
+                )
+
             for task in level:
                 task_id = task["task_id"]
                 agent_type = task["agent"]
@@ -579,7 +669,7 @@ class ExecutionEngine:
                                 f"but it was not completed."
                             )
 
-                    game_state = self.game_state_manager.get_state()
+                    game_state, state_version = self.game_state_manager.get_state_with_version()
 
                     if agent_type == "validation":
                         completed_tasks[task_id] = {
@@ -589,34 +679,18 @@ class ExecutionEngine:
                         }
 
                     elif agent_type == "precondition":
-                        check_name = task.get("check")
-
-                        if check_name == "validate_location":
-                            result = self.precondition_agent.validate_location(
-                                intent=intent,
-                                target=target,
-                                game_state=game_state,
-                                player_input=player_input
-                            )
-
-                        elif check_name == "check_player_resources":
-                            result = self.precondition_agent.check_player_resources(
-                                intent=intent,
-                                target=target,
-                                game_state=game_state,
-                                player_input=player_input
-                            )
-
-                        elif check_name == "check_target_status":
-                            result = self.precondition_agent.check_target_status(
-                                intent=intent,
-                                target=target,
-                                game_state=game_state,
-                                player_input=player_input
-                            )
-
+                        if task_id in prepared_preconditions:
+                            result = prepared_preconditions.pop(task_id)
+                            if isinstance(result, Exception):
+                                raise result
                         else:
-                            raise Exception(f"Unknown precondition check: {check_name}")
+                            result = self._run_precondition_check(
+                                task=task,
+                                game_state=game_state,
+                                player_input=player_input,
+                                intent=intent,
+                                target=target,
+                            )
 
                         execution_context["precondition_results"].append(result)
 
@@ -641,18 +715,23 @@ class ExecutionEngine:
                         completed_tasks[task_id] = result
 
                     elif agent_type == "semantic_memory":
-                        current_state = self.game_state_manager.get_state()
+                        # Keep the retrieval query focused on the player's words.
+                        # Including the entire state can accidentally trigger an
+                        # unrelated event-type classifier (e.g. drink_order).
+                        semantic_query = player_input
 
-                        semantic_query = (
-                            f"Player input: {player_input}. "
-                            f"Intent: {intent}. "
-                            f"Target: {target}. "
-                            f"Current game state: {current_state}"
+                        # Dialogue and persuasion use interaction history scoped
+                        # to the addressed NPC. World tasks retain global search.
+                        npc_memory_scope = (
+                            target
+                            if intent in {"dialogue_action", "persuasion_action"} and target
+                            else None
                         )
 
                         semantic_memory_results = self.semantic_memory_system.retrieve_relevant_events(
                             query=semantic_query,
-                            k=5
+                            k=5,
+                            npc_id=npc_memory_scope,
                         )
 
                         execution_context["semantic_memory_results"] = semantic_memory_results
@@ -704,7 +783,8 @@ class ExecutionEngine:
                                         "reason",
                                         "Consequence-based state update"
                                     ),
-                                    snapshot_id=snapshot_id
+                                    snapshot_id=snapshot_id,
+                                    expected_version=state_version,
                                 )
 
                             if not consequence_result.get("allow_action", True):
@@ -767,7 +847,8 @@ class ExecutionEngine:
                                 updates=result["state_updates"],
                                 source="CombatStepAgent",
                                 reason=result["message"],
-                                snapshot_id=snapshot_id
+                                snapshot_id=snapshot_id,
+                                expected_version=state_version,
                             )
 
                         elif step_name == "calculate_target_reaction":
@@ -792,7 +873,8 @@ class ExecutionEngine:
                                 updates=result["state_updates"],
                                 source="CombatStepAgent",
                                 reason=result["message"],
-                                snapshot_id=snapshot_id
+                                snapshot_id=snapshot_id,
+                                expected_version=state_version,
                             )
 
                             # A completed attack against a persistent social NPC
@@ -843,7 +925,8 @@ class ExecutionEngine:
                             updates=result["state_updates"],
                             source="CombatAgent",
                             reason=result["message"],
-                            snapshot_id=snapshot_id
+                            snapshot_id=snapshot_id,
+                            expected_version=state_version,
                         )
 
                         execution_result = result["message"]
@@ -894,7 +977,8 @@ class ExecutionEngine:
                                 updates=result["state_updates"],
                                 source="PersuasionStepAgent",
                                 reason=result["message"],
-                                snapshot_id=snapshot_id
+                                snapshot_id=snapshot_id,
+                                expected_version=state_version,
                             )
 
                             result_data = result.get("data", {})
@@ -961,7 +1045,8 @@ class ExecutionEngine:
                             updates=result["state_updates"],
                             source="PersuasionAgent",
                             reason=result["message"],
-                            snapshot_id=snapshot_id
+                            snapshot_id=snapshot_id,
+                            expected_version=state_version,
                         )
 
                         execution_result = result["message"]
@@ -1016,7 +1101,8 @@ class ExecutionEngine:
                                 updates=step_result["state_updates"],
                                 source="DialogueStepAgent",
                                 reason=step_result["message"],
-                                snapshot_id=snapshot_id
+                                snapshot_id=snapshot_id,
+                                expected_version=state_version,
                             )
 
                             # Persist an explicit apology as a personal NPC event.
@@ -1058,7 +1144,8 @@ class ExecutionEngine:
                                 relevant_memory=dialogue_relevant_memory,
                                 consequence_result=execution_context[
                                     "consequence_result"
-                                ]
+                                ],
+                                npc_context=self._build_npc_dialogue_context(target),
                             )
 
                             dialogue_decision = self._attach_working_dialogue_memory(
@@ -1091,7 +1178,8 @@ class ExecutionEngine:
                                     "message",
                                     "Structured dialogue decision"
                                 ),
-                                snapshot_id=snapshot_id
+                                snapshot_id=snapshot_id,
+                                expected_version=self.game_state_manager.get_state_with_version()[1],
                             )
 
 
@@ -1137,7 +1225,8 @@ class ExecutionEngine:
                             relevant_memory=dialogue_relevant_memory,
                             consequence_result=execution_context[
                                 "consequence_result"
-                            ]
+                            ],
+                            npc_context=self._build_npc_dialogue_context(target),
                         )
 
                         dialogue_decision = self._attach_working_dialogue_memory(
@@ -1155,7 +1244,8 @@ class ExecutionEngine:
                                 "message",
                                 "Structured dialogue decision"
                             ),
-                            snapshot_id=snapshot_id
+                            snapshot_id=snapshot_id,
+                            expected_version=state_version,
                         )
 
                         result = self.dialogue_generator_agent.execute(
@@ -1233,7 +1323,8 @@ class ExecutionEngine:
                                 updates=result["state_updates"],
                                 source="EventAgent",
                                 reason=result["message"],
-                                snapshot_id=snapshot_id
+                                snapshot_id=snapshot_id,
+                                expected_version=state_version,
                             )
 
                             event_context["event_message"] = result["message"]
@@ -1269,7 +1360,8 @@ class ExecutionEngine:
                                 updates=result["state_updates"],
                                 source="EventAgent",
                                 reason=result["message"],
-                                snapshot_id=snapshot_id
+                                snapshot_id=snapshot_id,
+                                expected_version=state_version,
                             )
 
                         else:
@@ -1294,7 +1386,8 @@ class ExecutionEngine:
                             updates=result["state_updates"],
                             source="ExplorationAgent",
                             reason=result["message"],
-                            snapshot_id=snapshot_id
+                            snapshot_id=snapshot_id,
+                            expected_version=state_version,
                         )
 
                         execution_result = result["message"]
@@ -1318,7 +1411,8 @@ class ExecutionEngine:
                             updates=result["state_updates"],
                             source="TavernAgent",
                             reason=result["message"],
-                            snapshot_id=snapshot_id
+                            snapshot_id=snapshot_id,
+                            expected_version=state_version,
                         )
 
                         # A successful tavern transaction may also be a meaningful
@@ -1409,7 +1503,8 @@ class ExecutionEngine:
                                 updates=context_updates,
                                 source="ExecutionEngine",
                                 reason="Update active interaction context",
-                                snapshot_id=snapshot_id
+                                snapshot_id=snapshot_id,
+                                expected_version=self.game_state_manager.get_state_with_version()[1],
                             )
                             final_state = self.game_state_manager.get_state()
 
@@ -1512,7 +1607,8 @@ class ExecutionEngine:
                         updates=fallback_result["state_updates"],
                         source="FallbackManager",
                         reason=fallback_result["message"],
-                        snapshot_id=snapshot_id
+                        snapshot_id=snapshot_id,
+                        expected_version=self.game_state_manager.get_state_with_version()[1],
                     )
 
                     execution_result = fallback_result["message"]
@@ -1577,7 +1673,8 @@ class ExecutionEngine:
             updates=context_updates,
             source="ExecutionEngine",
             reason="Update active interaction context",
-            snapshot_id=snapshot_id
+            snapshot_id=snapshot_id,
+            expected_version=self.game_state_manager.get_state_with_version()[1],
         )
 
         final_state = self.game_state_manager.get_state()

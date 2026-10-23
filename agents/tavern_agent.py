@@ -31,17 +31,17 @@ class TavernAgent:
         }
 
         self.quality_modifiers: Dict[str, float] = {
-            "cheap": 0.6,
-            "simple": 0.8,
-            "regular": 1.0,
-            "normal": 1.0,
-            "good": 1.2,
-            "fine": 1.5,
-            "finest": 2.0,
-            "expensive": 2.0,
-            "best": 2.2,
-            "premium": 2.5,
-            "royal": 3.0,
+            "cheap": 1,  # 0.6,
+            "simple": 1,  # 0.8,
+            "regular": 1,  # 1.0,
+            "normal": 1,  # 1.0,
+            "good": 1,  # 1.2,
+            "fine": 1,  # 1.5,
+            "finest": 1,  # 2.0,
+            "expensive": 1,  # 2.0,
+            "best": 1,  # 2.2,
+            "premium": 1,  # 2.5,
+            "royal": 1,  # 3.0,
         }
 
         self.room_price = 10
