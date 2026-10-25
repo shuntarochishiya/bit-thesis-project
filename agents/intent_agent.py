@@ -514,10 +514,7 @@ class IntentRecognitionAgent:
         # =========================================================
         # 1. Combat
         # =========================================================
-        if self._contains_any(
-            text,
-            self.combat_words
-        ):
+        if self._is_explicit_combat_action(text):
             combat_target = (
                 explicit_npc_target
                 or context_npc_target
@@ -681,8 +678,40 @@ class IntentRecognitionAgent:
                 reason="bartender interaction inside tavern",
             )
 
+        # Explicitly leaving the NPC is movement, not another spoken reply.
+        if re.search(
+            r"^(?:i\s+)?(?:walk away|go away|leave|step away|turn and leave)\b",
+            text,
+        ):
+            return self._build_result(
+                intent="exploration_action",
+                target=location_target,
+                confidence=0.94,
+                reason="explicit departure from NPC",
+            )
+
         # =========================================================
-        # 8. General fallback
+        # 8. Contextual NPC dialogue fallback
+        # =========================================================
+        # An utterance such as "I don't see other customers either way"
+        # is a reply to the NPC, even without a dialogue keyword.
+        # Keep this AFTER all authoritative action routes (combat,
+        # persuasion, tavern service, exploration) so that selecting an
+        # NPC in Unity does not suppress explicit gameplay commands.
+        conversation_target = self._active_conversation_target(context)
+        if (
+            context_npc_target in {"merchant", "bartender", "enemy"}
+            and (target_hint is not None or conversation_target == context_npc_target)
+        ):
+            return self._build_result(
+                intent="dialogue_action",
+                target=context_npc_target,
+                confidence=0.86 if conversation_target else 0.80,
+                reason="contextual NPC conversation reply",
+            )
+
+        # =========================================================
+        # 9. General fallback
         # =========================================================
         return self._build_result(
             intent="general_action",
@@ -905,6 +934,9 @@ class IntentRecognitionAgent:
         if target not in {"merchant", "bartender", "enemy"}:
             return False
 
+        if self._is_future_violence_threat(text):
+            return True
+
         # Direct intimidation vocabulary and common weapon-menace phrases.
         if self._contains_any(text, self.social_threat_words):
             # Explicit completed attack phrasing still wins unless the attack
@@ -948,6 +980,50 @@ class IntentRecognitionAgent:
             re.search(pattern, text) is not None
             for pattern in conditional_threat_patterns
         )
+
+    def _is_explicit_combat_action(self, text: str) -> bool:
+        """Require an actual attack command, not a violent word in speech."""
+        if self._is_future_violence_threat(text):
+            return False
+        if not self._contains_any(text, self.combat_words):
+            return False
+
+        # Direct actions: "I stab him", "attack the merchant", "I fight".
+        action_verbs = (
+            "attack", "hit", "strike", "stab", "slash", "shoot",
+            "punch", "kick", "kill", "fight", "assault", "smash",
+            "hurt", "wound", "destroy", "ambush", "execute",
+        )
+        verbs = "|".join(action_verbs)
+        patterns = (
+            rf"^(?:i\s+|i\s+will\s+|i'll\s+)?(?:{verbs})\b",
+            rf"\b(?:i|we)\s+(?:am\s+|are\s+)?(?:now\s+)?(?:{verbs})\b",
+            rf"\b(?:let's|let us)\s+(?:{verbs})\b",
+        )
+        return any(re.search(pattern, text) for pattern in patterns)
+
+    @staticmethod
+    def _is_future_violence_threat(text: str) -> bool:
+        """Detect threats of future violence, including demands joined by 'or'."""
+        future_violence = (
+            r"\b(?:i(?:'ll| will)|i(?:'m| am) going to|"
+            r"i(?:'m| am) gonna|i swear i(?:'ll| will))\s+"
+            r"(?:\w+\s+){0,3}?(?:kill|hurt|stab|shoot|beat|attack|"
+            r"murder|slaughter|destroy)\b"
+        )
+        if re.search(future_violence, text):
+            return True
+        return bool(re.search(
+            r"\b(?:or else|you(?:'ll| will) regret|if you (?:don't|do not))\b",
+            text,
+        ) and re.search(r"\b(?:kill|hurt|stab|shoot|beat|attack)\b", text))
+
+    def _active_conversation_target(self, context: Dict[str, Any]) -> Optional[str]:
+        """Only an active conversation counts, not a stale last target."""
+        value = context.get("active_conversation")
+        if value is None:
+            return None
+        return self._normalize_target_hint(str(value))
 
     def _is_completed_attack(
         self,

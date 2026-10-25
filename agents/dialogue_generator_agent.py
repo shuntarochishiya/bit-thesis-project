@@ -6,6 +6,8 @@ import re
 
 import requests
 
+from agents.dialogue_validator_agent import DialogueValidatorAgent
+
 
 class DialogueGeneratorAgent:
     """
@@ -125,6 +127,26 @@ class DialogueGeneratorAgent:
             if relevant_memories or has_personal_beliefs
             else "llm"
         )
+
+        # A claim about a past sale is a factual question, not an invitation
+        # to invent a shared memory. When there is no supporting NPC-specific
+        # record, answer deterministically instead of trusting an LLM to deny it.
+        # This guard is deliberately limited to past-sale claims.
+        if self._is_unverified_personal_sale(dialogue_context):
+            if self.debug:
+                print("[NPC MEMORY GUARD] Unverified personal sale; using grounded reply.")
+            return self._build_success_result(
+                dialogue_result=dialogue_result,
+                generated_reply=self._generate_fallback_reply(data, dialogue_context),
+                response_source="deterministic_fallback",
+                generation_time=0.0,
+                prompt=prompt,
+                relevant_memories=relevant_memories,
+                validation={
+                    "valid": True,
+                    "reason": "Unverified past sale handled without LLM generation.",
+                },
+            )
 
         start_time = time.perf_counter()
 
@@ -345,6 +367,8 @@ class DialogueGeneratorAgent:
             game_state
         )
 
+        role_guidance = self._role_guidance(target)
+
         return f"""
 Fantasy RPG NPC dialogue.
 
@@ -363,9 +387,13 @@ RULES
 - When the player claims you previously sold them something and no such evidence is available, politely say you do not recall that sale. Do not agree merely to be friendly; do not claim another NPC sold it unless verified.
 - RECENT CONVERSATION may provide continuity, but must not override the identity of the current NPC.
 - If refusing, refuse briefly but in character.
+- Stay within the NPC's actual occupation and responsibilities; nearby NPCs have different jobs.
+- Do not invent a new customer or unrelated service obligation to end a conversation.
+- Mention another profession or tavern service only when relevant; never assume that service is your job.
 
 NPC
 Role: {target}
+Occupational boundaries: {role_guidance}
 Personality: {personality_text}
 Goals: {goals_text}
 
@@ -392,6 +420,22 @@ PLAYER
 
 Return only the spoken reply.
 """.strip()
+
+    @staticmethod
+    def _role_guidance(target: str) -> str:
+        role = str(target or "").strip().lower()
+        guidance = {
+            "merchant": (
+                "You sell goods and negotiate prices. You are not the bartender "
+                "or innkeeper; you do not serve drinks or invent customers "
+                "waiting for drinks. You may discuss the tavern if relevant."
+            ),
+            "bartender": (
+                "You serve drinks and converse with patrons. You are not "
+                "the merchant; do not claim to sell the merchant's goods."
+            ),
+        }
+        return guidance.get(role, "Follow the supplied NPC profile and established role.")
 
     def _build_world_context(
         self,
@@ -830,6 +874,14 @@ Return only the spoken reply.
                     "reason": "NPC affirmed a personal sale without supporting memory.",
                 }
 
+        role_conflict = DialogueValidatorAgent.find_role_conflict(
+            reply=normalized,
+            target=target,
+            player_input=str(dialogue_context.get("player_input") or ""),
+        )
+        if role_conflict:
+            return {"valid": False, "reason": role_conflict}
+
         return {
             "valid": True,
             "reason": ""
@@ -882,9 +934,16 @@ Return only the spoken reply.
         the authority on what an NPC knows.
         """
         player_input = str(dialogue_context.get("player_input") or "").lower()
+        # Only explicit claims/questions about a completed transaction qualify.
+        # Present-tense inventory questions such as "What do you sell?" must
+        # reach the dialogue model instead of triggering the memory fallback.
         mentions_sale = bool(re.search(
-            r"\b(?:you|your)\b.{0,65}\b(?:sold|sell|selling|served|gave)\b|"
-            r"\b(?:sold|sell|selling|served|gave)\b.{0,65}\b(?:me|us)\b",
+            r"\b(?:you|your)\b(?:\W+\w+){0,5}\W+"
+            r"(?:sold|gave|served)\b|"
+            r"\b(?:did you|have you|had you)\s+(?:ever\s+)?"
+            r"(?:sell|sold|give|given|serve|served)\s+(?:me|us)\b|"
+            r"\b(?:sold|gave|served)\s+(?:me|us)\b|"
+            r"\b(?:sold|gave|served)\s+to\s+(?:me|us)\b",
             player_input,
         ))
         if not mentions_sale:

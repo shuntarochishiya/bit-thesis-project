@@ -82,6 +82,46 @@ class DialogueValidatorAgent:
         self.max_reply_length = max_reply_length
         self.debug = debug
 
+    @staticmethod
+    def find_role_conflict(reply: str, target: str, player_input: str = "") -> Optional[str]:
+        """Catch clear occupational role confusion, not ordinary tavern references.
+
+        This is deliberately narrow: a merchant may mention drinks or taverns,
+        but should not act as the bartender or divert an unrelated exchange
+        into serving a drink. Contextual mentions remain permissible.
+        """
+        role = str(target or "").strip().lower()
+        text = str(reply or "").lower()
+        request = str(player_input or "").lower()
+
+        if role != "merchant":
+            return None
+
+        # Merchant explicitly claiming to perform bartender duties.
+        bartender_claims = (
+            r"\bi\s+(?:am|work as)\s+(?:the\s+|a\s+)?(?:bartender|barman|barmaid|innkeeper)\b",
+            r"\bi\s+(?:will|can|shall|could|would|\x27ll)\s+(?:pour|serve)\s+(?:you\s+)?(?:a\s+|some\s+)?(?:beer|ale|wine|mead|drink|liquor)\b",
+            r"\b(?:let me|i\x27ll|i will)\s+(?:pour|fetch|bring)\s+(?:you\s+)?(?:a\s+|some\s+)?(?:beer|ale|wine|mead|drink)\b",
+        )
+        for pattern in bartender_claims:
+            if re.search(pattern, text):
+                return "Merchant assumes bartender duties."
+
+        # Do not treat an on-topic discussion of drinks as a mistake.
+        if re.search(r"\b(?:drink|wine|ale|beer|mead|tavern|inn|bar|thirst)\b", request):
+            return None
+
+        # Specific observed failure: a merchant unexpectedly dismisses the
+        # player because a different customer supposedly needs a drink.
+        if re.search(
+            r"\b(?:customer|patron|someone|traveler|traveller)\b.{0,65}"
+            r"\b(?:need|needs|want|wants|order|orders|waiting for)\b.{0,35}"
+            r"\b(?:a\s+)?(?:drink|beer|ale|wine|mead)\b",
+            text,
+        ):
+            return "Merchant introduces unrelated bartender service."
+        return None
+
     def validate(
         self,
         generated_result: Dict[str, Any],
@@ -182,6 +222,16 @@ class DialogueValidatorAgent:
                 "The dialogue decision simultaneously refuses conversation "
                 "and permits trading."
             )
+
+        # Validate occupational grounding against the NPC selected by Unity.
+        context = decision_data.get("dialogue_context", {})
+        if not isinstance(context, dict):
+            context = {}
+        target = str(context.get("target") or decision_data.get("target") or "")
+        player_input = str(context.get("player_input") or "")
+        role_conflict = self.find_role_conflict(cleaned_reply, target, player_input)
+        if role_conflict:
+            validation_errors.append(role_conflict)
 
         if validation_errors:
             fallback_reply = self._build_fallback_reply(

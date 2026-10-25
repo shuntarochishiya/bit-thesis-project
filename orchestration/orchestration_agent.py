@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 from typing import Any
@@ -246,7 +245,22 @@ class OrchestrationAgent:
             target,
         )
 
-        plan = self.task_planner.build_plan(intent)
+        # Build a fresh, validated DAG from the authoritative state snapshot.
+        # Existing intent-only templates remain the default for normal turns.
+        npc_context: dict[str, Any] = {}
+        if intent == "dialogue_action" and target:
+            try:
+                npc_context = self.npc_state_manager.build_simulation_context(target)
+            except (KeyError, ValueError):
+                # Unknown targets keep the standard, validated dialogue DAG.
+                npc_context = {}
+
+        plan = self.task_planner.build_plan(
+            intent=intent,
+            game_state=state_before,
+            target=target,
+            npc_context=npc_context,
+        )
 
         self.execution_logger.set_dag(plan)
 

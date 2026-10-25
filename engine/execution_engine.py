@@ -143,6 +143,7 @@ class ExecutionEngine:
         dialogue_decision: Dict[str, Any],
         target: str | None,
         limit: int = 3,
+        player_input: str = "",
     ) -> Dict[str, Any]:
         """
         Attach recent NPC-specific conversation turns to the structured
@@ -167,6 +168,8 @@ class ExecutionEngine:
             data["dialogue_context"] = dialogue_context
 
         dialogue_context["conversation_history"] = history
+        dialogue_context["player_input"] = player_input
+        dialogue_context["target"] = target
         return dialogue_decision
 
     def _retrieve_npc_episodic_memory(
@@ -281,6 +284,7 @@ class ExecutionEngine:
         dialogue_decision = self._attach_working_dialogue_memory(
             dialogue_decision=dialogue_decision,
             target=target,
+        player_input=player_input,
         )
 
         # Explicitly expose episodic memory to the generator context as well.
@@ -541,6 +545,7 @@ class ExecutionEngine:
 
         execution_context: Dict[str, Any] = {
             "semantic_memory_results": [],
+            "npc_episodic_memory_results": [],
             "precondition_results": [],
             "combat_context": {
                 "hit": False,
@@ -745,6 +750,23 @@ class ExecutionEngine:
                             "state_updates": {}
                         }
 
+                    elif agent_type == "npc_memory":
+                        # Context-dependent DAG node. NPCStateManager returns
+                        # independent copies of NPC-specific personal memories.
+                        episodic = self._retrieve_npc_episodic_memory(
+                            target=target,
+                            limit=5,
+                        )
+                        execution_context["npc_episodic_memory_results"] = episodic
+                        execution_result = (
+                            f"Retrieved {len(episodic)} personal NPC memories."
+                        )
+                        completed_tasks[task_id] = {
+                            "success": True,
+                            "message": execution_result,
+                            "state_updates": {},
+                        }
+
                     elif agent_type == "consequence":
                         # If a precondition already blocked the action,
                         # do not overwrite the blocking reason.
@@ -763,6 +785,12 @@ class ExecutionEngine:
 
                         else:
                             current_state = self.game_state_manager.get_state()
+
+                            print("[CONSEQUENCE DEBUG] intent:", intent)
+                            print("[CONSEQUENCE DEBUG] target:", target)
+                            print("[CONSEQUENCE DEBUG] merchant_hostile:", current_state.get("merchant_hostile"))
+                            print("[CONSEQUENCE DEBUG] merchant_health:", current_state.get("merchant_health"))
+                            print("[CONSEQUENCE DEBUG] relevant_memory:", execution_context["semantic_memory_results"])
 
                             consequence_result = self.consequence_agent.evaluate(
                                 player_input=player_input,
@@ -1060,7 +1088,10 @@ class ExecutionEngine:
                             result = self.dialogue_step_agent.analyze_npc_attitude(
                                 game_state=game_state,
                                 target=target,
-                                relevant_memory=execution_context["semantic_memory_results"],
+                                relevant_memory=(
+                                    execution_context["semantic_memory_results"]
+                                    + execution_context["npc_episodic_memory_results"]
+                                ),
                                 action_blocked=execution_context["action_blocked"]
                             )
 
@@ -1151,6 +1182,7 @@ class ExecutionEngine:
                             dialogue_decision = self._attach_working_dialogue_memory(
                                 dialogue_decision=dialogue_decision,
                                 target=target,
+                            player_input=player_input,
                             )
 
                             generated_result = self.dialogue_generator_agent.execute(
@@ -1232,6 +1264,7 @@ class ExecutionEngine:
                         dialogue_decision = self._attach_working_dialogue_memory(
                             dialogue_decision=dialogue_decision,
                             target=target,
+                        player_input=player_input,
                         )
 
                         self.apply_state_updates(
