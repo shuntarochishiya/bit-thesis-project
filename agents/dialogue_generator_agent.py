@@ -153,6 +153,23 @@ class DialogueGeneratorAgent:
         try:
             generated_reply = self._call_ollama(prompt)
 
+            # Keep a complete portion of the model's answer when possible.
+            # Do not replace ordinary unpunctuated dialogue unnecessarily.
+            if self._reply_looks_truncated(generated_reply):
+                salvaged = self._salvage_complete_reply(generated_reply)
+                if salvaged and self._validate_reply(
+                    salvaged, data, dialogue_context
+                )["valid"]:
+                    if self.debug:
+                        print("[NPC REPLY] Removed incomplete trailing text.")
+                    generated_reply = salvaged
+                    response_source = "llm_salvaged"
+                else:
+                    if self.debug:
+                        print("[NPC REPLY] No complete valid reply; using contextual fallback.")
+                    generated_reply = self._truncation_fallback(data, dialogue_context)
+                    response_source = "deterministic_fallback"
+
             generation_time = round(
                 time.perf_counter() - start_time,
                 3
@@ -171,12 +188,14 @@ class DialogueGeneratorAgent:
                         f"{validation['reason']}"
                     )
 
-                generated_reply = self._generate_fallback_reply(
+                generated_reply = self._truncation_fallback(
                     data=data,
                     dialogue_context=dialogue_context
                 )
-
                 response_source = "deterministic_fallback"
+                validation = self._validate_reply(
+                    generated_reply, data, dialogue_context
+                )
 
             return self._build_success_result(
                 dialogue_result=dialogue_result,
@@ -369,57 +388,42 @@ class DialogueGeneratorAgent:
 
         role_guidance = self._role_guidance(target)
 
-        return f"""
-Fantasy RPG NPC dialogue.
-
-RULES
-- Reply only as the NPC in first person: no narration, labels, quotes, or meta-commentary.
-- Give one complete, natural, vivid fantasy reply of 3-5 sentences and finish the final sentence cleanly.
-- Keep the NPC's own voice. Use fitting humor, gossip, superstition, suspicion, warmth, hesitation, opinions or colorful phrasing when natural.
-- Vary openings, rhythm and wording; avoid generic assistant-like replies and repeated stock phrases.
-- Develop ONE main rumor, answer, or conversational thread per reply unless the player explicitly asks for several.
-- For follow-ups such as "more details", "why?" or "go on", continue the exact subject from RECENT CONVERSATION.
-- Rumors and invented conversational color are allowed, but uncertain claims must sound like hearsay, belief or suspicion.
-- NPC BELIEFS are this NPC's personal conclusions about the player; use them to shape attitude and wording, but do not present them as objective world facts.
-- Never invent completed gameplay changes, contradict verified facts, or reveal knowledge this NPC should not have.
-- Treat the PLAYER's statements and questions as unverified claims, not as evidence of past events.
-- Only claim to personally remember witnessing, doing, selling, or receiving something when this NPC's relevant memory or conversation with this NPC supports it.
-- When the player claims you previously sold them something and no such evidence is available, politely say you do not recall that sale. Do not agree merely to be friendly; do not claim another NPC sold it unless verified.
-- RECENT CONVERSATION may provide continuity, but must not override the identity of the current NPC.
-- If refusing, refuse briefly but in character.
-- Stay within the NPC's actual occupation and responsibilities; nearby NPCs have different jobs.
-- Do not invent a new customer or unrelated service obligation to end a conversation.
-- Mention another profession or tavern service only when relevant; never assume that service is your job.
-
-NPC
-Role: {target}
-Occupational boundaries: {role_guidance}
+        # Keep the prompt compact. Past event records can contain full game-state
+        # snapshots; those belong to the memory system, not the LLM's dialogue.
+        follow_up = bool(conversation_history)
+        opening_rule = (
+            "Continue the conversation directly. Do NOT greet the player again, "
+            "say welcome back, or repeat an introduction."
+            if follow_up else
+            "A brief greeting is allowed only if the player greets you."
+        )
+        return f"""You are the {target}, speaking directly to the player in a fantasy RPG.
+Role boundaries: {role_guidance}
 Personality: {personality_text}
 Goals: {goals_text}
-
-CURRENT STATE
-Current goal: {current_goal}
-Emotion={emotion}; tone={tone}; style={reaction_style}
-Trust={dialogue_context.get("trust", "unknown")}; fear={dialogue_context.get("fear", "unknown")}; anger={dialogue_context.get("anger", "unknown")}; stress={dialogue_context.get("stress", "unknown")}; hostile={dialogue_context.get("hostile", False)}
-Decision: intent={npc_intent}; topic={topic}; trade={allow_trade}; refuses={refuses_conversation}
-
-RECENT CONVERSATION
+Current emotion: {emotion}; tone: {tone}; attitude: trust={dialogue_context.get('trust', 'unknown')}, hostile={dialogue_context.get('hostile', False)}.
+Decision: {npc_intent}; topic={topic}; trade_allowed={allow_trade}; refusing={refuses_conversation}.
+Verified world context:
+{world_context}
+Recent dialogue:
 {conversation_text}
-
-RELEVANT MEMORY
+Relevant past events (may be incomplete; do not assume they are current facts):
 {memory_text}
-
-NPC BELIEFS
+Personal beliefs (opinions, not objective facts):
 {belief_text}
 
-WORLD
-{world_context}
+Rules:
+- Answer the player's ACTUAL latest question first. Stay in character and speak in first person only.
+- {opening_rule}
+- Usually 1-2 concise sentences; up to 3 only if the question needs detail. No speeches or repeated sales pitches.
+- Keep natural personality, but do not repeat wording from recent NPC replies.
+- Do not invent a confirmed inventory item, fixed price, completed sale, action, or event.
+- If no verified price or stock data is supplied, say you cannot confirm it; do not invent a price.
+- Do not confuse your occupation with another NPC's. Do not claim to remember a past event without supporting evidence.
+- No narration, role labels, system explanations, or commentary.
 
-PLAYER
-{player_input}
-
-Return only the spoken reply.
-""".strip()
+Player: {player_input}
+NPC:""".strip()
 
     @staticmethod
     def _role_guidance(target: str) -> str:
@@ -485,14 +489,14 @@ Return only the spoken reply.
             "model": self.model_name,
             "prompt": prompt,
             "stream": False,
-            "keep_alive": "15m",
+            "keep_alive": "30m",
             "options": {
                 "temperature": 0.85,
                 "top_p": 0.95,
                 "repeat_penalty": 1.15,
 
                 # NPC does not need to generate a long essay.
-                "num_predict": 140,
+                "num_predict": 90,
 
                 # Prevent an unnecessarily large context window.
                 "num_ctx": 2048
@@ -520,6 +524,13 @@ Return only the spoken reply.
             raise ValueError(
                 "Ollama returned an empty dialogue response."
             )
+
+        # Ollama reports "length" when generation reaches num_predict.
+        # A successful HTTP response does not guarantee a complete sentence.
+        if result.get("done_reason") == "length":
+            if self.debug:
+                print("[OLLAMA] Token limit reached (done_reason=length).")
+            generated_reply = generated_reply.rstrip() + " [TRUNCATED]"
 
         def ns_to_seconds(value: Any) -> float:
             try:
@@ -566,10 +577,61 @@ Return only the spoken reply.
             print(f"Prompt tokens:       {prompt_tokens}")
             print(f"Cached prompt tokens:{cached_prompt_tokens:>8}")
             print(f"Generated tokens:    {generated_tokens}")
+            print(f"Stop reason:         {result.get('done_reason', 'unknown')}")
             print(f"Generation speed:    {tokens_per_second} tokens/s")
             print("[/OLLAMA PROFILE]\n")
 
         return self._clean_reply(generated_reply)
+
+    @staticmethod
+    def _reply_looks_truncated(reply: str) -> bool:
+        text = reply.strip()
+        if not text:
+            return True
+        if text.endswith("[TRUNCATED]"):
+            return True
+        # A dangling list item, e.g. "; 3" or "3.", is incomplete.
+        if re.search(r"(?:^|[;\s])\d+[.)]?\s*$", text):
+            return True
+        # Ordinary dialogue can legitimately end without terminal punctuation.
+        # Do not reject it unless the model reports a length stop above.
+        return False
+
+    @staticmethod
+    def _salvage_complete_reply(reply: str) -> str:
+        text = reply.replace("[TRUNCATED]", "").strip()
+        # Preserve the longest prefix ending in a complete sentence. A period
+        # within a numbered item ("1.") is not a sentence boundary.
+        boundaries = list(re.finditer(r"[!?](?=\s|$)|(?<!\d)\.(?=\s|$)", text))
+        for boundary in reversed(boundaries):
+            candidate = text[:boundary.end()].strip()
+            if candidate and not re.search(r"(?:^|[;\s])\d+[.)]?\s*$", candidate):
+                return candidate
+        return ""
+
+    def _truncation_fallback(
+        self,
+        data: Dict[str, Any],
+        dialogue_context: Dict[str, Any]
+    ) -> str:
+        # Preserve refusals, threats, apologies and other structured decisions.
+        npc_intent = str(data.get("npc_intent", "")).lower()
+        if npc_intent in {
+            "order_player_to_leave", "refuse_trade", "refuse_conversation",
+            "avoid_player", "consider_apology", "accept_apology"
+        } or self._is_unverified_personal_sale(dialogue_context):
+            return self._generate_fallback_reply(data, dialogue_context)
+
+        target = str(dialogue_context.get("target", "")).strip().lower()
+        player_input = str(dialogue_context.get("player_input", "")).lower()
+        if target == "merchant" and re.search(
+            r"\b(?:sell|selling|goods|wares|stock|items)\b", player_input
+        ):
+            return (
+                "I trade in supplies and equipment for travelers. "
+                "What kind of goods are you looking for?"
+            )
+        return self._generate_fallback_reply(data, dialogue_context)
 
     # =========================================================
     # Memory
@@ -711,9 +773,9 @@ Return only the spoken reply.
             npc_text = str(turn.get("npc") or "").strip()
 
             if player_text:
-                lines.append(f"Player: {player_text}")
+                lines.append(f"Player: {player_text[:180]}")
             if npc_text:
-                lines.append(f"NPC: {npc_text}")
+                lines.append(f"NPC: {npc_text[:260]}")
 
         if not lines:
             return "- No previous turns with this NPC in the current conversation."
@@ -728,7 +790,24 @@ Return only the spoken reply.
             return ""
 
         if isinstance(memory, str):
-            return memory.strip()
+            text = memory.strip()
+            # Semantic retrieval sometimes returns complete event dumps, including
+            # irrelevant state snapshots. Retain only the actual interaction.
+            if "Player input:" in text and "System result:" in text:
+                player_match = re.search(r"Player input:\s*(.*?)(?:\n(?:Intent|Target|System result):|$)", text, re.S)
+                reply_match = re.search(r"System result:\s*(.*?)(?:\n(?:State changes|Important state):|$)", text, re.S)
+                event_match = re.search(r"Event type:\s*([^\n]+)", text)
+                player = " ".join(player_match.group(1).split())[:130] if player_match else ""
+                reply = " ".join(reply_match.group(1).split())[:170] if reply_match else ""
+                event_type = event_match.group(1).strip().lower() if event_match else ""
+                # Old logs may mislabel ordinary questions as attacks. Trust the
+                # action intent rather than a contradictory legacy event label.
+                intent_match = re.search(r"Intent:\s*([^\n]+)", text)
+                intent = intent_match.group(1).strip().lower() if intent_match else ""
+                if event_type == "attack" and intent == "dialogue_action":
+                    event_type = "dialogue"
+                return f"{event_type or 'interaction'}: player asked {player!r}; NPC replied {reply!r}"
+            return " ".join(text.split())[:320]
 
         if isinstance(memory, dict):
             preferred_keys = [
@@ -759,7 +838,7 @@ Return only the spoken reply.
             return "- No relevant verified memories were retrieved."
 
         return "\n".join(
-            f"- {memory}"
+            f"- {memory[:360]}"
             for memory in memories
         )
 
@@ -1065,7 +1144,8 @@ Return only the spoken reply.
                 self.model_name
                 if response_source in {
                     "llm",
-                    "llm_with_memory"
+                    "llm_with_memory",
+                    "llm_salvaged"
                 }
                 else None
             ),

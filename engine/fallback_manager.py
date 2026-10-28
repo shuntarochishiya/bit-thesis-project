@@ -60,8 +60,8 @@ class FallbackManager:
 
         if fallback_name == "skip_consequence_check":
             return {
-                "success": True,
-                "message": "Consequence evaluation was skipped due to an internal issue.",
+                "success": False,
+                "message": "The action was stopped because its consequences could not be checked.",
                 "state_updates": {}
             }
 
@@ -95,8 +95,8 @@ class FallbackManager:
 
         if fallback_name == "safe_event_response":
             return {
-                "success": True,
-                "message": "The event system failed, so the world remains quiet for now.",
+                "success": False,
+                "message": "The event could not be resolved, so event processing was stopped.",
                 "state_updates": {}
             }
 

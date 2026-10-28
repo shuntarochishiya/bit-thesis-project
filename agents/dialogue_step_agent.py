@@ -1,4 +1,5 @@
 from typing import Dict, Any, List
+import re
 
 
 class DialogueStepAgent:
@@ -101,15 +102,19 @@ class DialogueStepAgent:
         # Legacy string memories remain supported, but structured episodic
         # records are not counted a second time here.
         if not episodic_signal["has_structured_memory"]:
-            if "attack" in memory_text or "hostile" in memory_text or "violence" in memory_text:
+            # Retrieved semantic memories contain NPC speech and serialized state.
+            # Those are NOT evidence of aggression or kindness by the player.
+            # Use the recorded event type only, never arbitrary substrings.
+            event_types = [
+                match.group(1).strip().lower()
+                for match in re.finditer(r"(?im)^Event type:\s*([a-z_]+)\s*$", memory_text)
+            ]
+            if any(kind in {"attack", "robbery", "threat", "insult"} for kind in event_types):
                 attitude_modifier -= 20
-
                 if npc_attitude not in ["defeated", "hostile"]:
                     npc_attitude = "distrustful"
-
-            if "friendly" in memory_text or "helped" in memory_text or "generous" in memory_text:
+            elif any(kind in {"help", "gift", "apology"} for kind in event_types):
                 attitude_modifier += 10
-
                 if npc_attitude == "neutral":
                     npc_attitude = "friendly"
 
@@ -356,10 +361,8 @@ class DialogueStepAgent:
 
         if target == "merchant":
             if dialogue_strategy == "cold_refusal":
-                updates["relationship_with_merchant"] = max(
-                    game_state.get("relationship_with_merchant", 50) - 2,
-                    0
-                )
+                # A cold reply reflects existing distrust; it is not a new
+                # hostile act by the player. Do not penalize every question.
                 message = "The merchant responds coldly and refuses to continue the conversation."
 
             elif dialogue_strategy == "cautious_listening":
@@ -382,10 +385,7 @@ class DialogueStepAgent:
         elif target == "bartender":
             if dialogue_strategy == "cold_refusal":
                 updates["bartender_mood"] = "cold"
-                updates["relationship_with_bartender"] = max(
-                    game_state.get("relationship_with_bartender", 50) - 2,
-                    0
-                )
+                # Refusal alone does not constitute a new negative event.
                 message = "The bartender gives a cold answer and avoids further conversation."
 
             elif dialogue_strategy == "helpful_information":

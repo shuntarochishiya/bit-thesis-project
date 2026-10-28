@@ -288,13 +288,10 @@ class PersuasionStepAgent:
                 }
             }
 
-        updates = {
-            "relationship_with_merchant": max(
-                game_state.get("relationship_with_merchant", 50) - 5,
-                0
-            ),
-            "world_mood": "tense"
-        }
+        # An unsuccessful, non-threatening request is not an insult.
+        # Keep relationship and world mood unchanged; intimidation is
+        # handled separately above with its own consequences.
+        updates = {}
 
         return {
             "success": True,

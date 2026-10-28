@@ -19,6 +19,7 @@ from agents.narrative_agent import NarrativeGenerationAgent
 from agents.tavern_agent import TavernAgent
 from agents.consequence_agent import ConsequenceAgent
 from agents.precondition_agent import PreconditionAgent
+from agents.action_validation_agent import ActionValidationAgent
 from agents.combat_step_agent import CombatStepAgent
 from agents.persuasion_step_agent import PersuasionStepAgent
 from agents.dialogue_step_agent import DialogueStepAgent
@@ -677,11 +678,20 @@ class ExecutionEngine:
                     game_state, state_version = self.game_state_manager.get_state_with_version()
 
                     if agent_type == "validation":
-                        completed_tasks[task_id] = {
-                            "success": True,
-                            "message": "Validation completed.",
-                            "state_updates": {}
-                        }
+                        # Validate the action contract before any gameplay effects.
+                        # Target availability and resources belong to PreconditionAgent.
+                        validation_result = ActionValidationAgent().execute(
+                            player_input=player_input,
+                            intent=intent,
+                            target=target,
+                            game_state=game_state,
+                        )
+                        if not validation_result.get("success", False):
+                            raise ValueError(validation_result.get(
+                                "message", "Action validation failed."
+                            ))
+                        execution_result = validation_result["message"]
+                        completed_tasks[task_id] = validation_result
 
                     elif agent_type == "precondition":
                         if task_id in prepared_preconditions:
@@ -733,11 +743,28 @@ class ExecutionEngine:
                             else None
                         )
 
-                        semantic_memory_results = self.semantic_memory_system.retrieve_relevant_events(
-                            query=semantic_query,
-                            k=5,
-                            npc_id=npc_memory_scope,
-                        )
+                        # Retry only this read-only operation. Never retry
+                        # state-changing actions: they may already have committed.
+                        max_memory_attempts = 2
+                        for memory_attempt in range(1, max_memory_attempts + 1):
+                            try:
+                                semantic_memory_results = self.semantic_memory_system.retrieve_relevant_events(
+                                    query=semantic_query,
+                                    k=5,
+                                    npc_id=npc_memory_scope,
+                                )
+                                if memory_attempt > 1:
+                                    print(f"[RETRY SUCCESS] {task_id} attempt={memory_attempt}")
+                                break
+                            except (TimeoutError, ConnectionError, OSError) as memory_error:
+                                print(
+                                    f"[RETRY] {task_id} attempt={memory_attempt}/"
+                                    f"{max_memory_attempts} error={type(memory_error).__name__}: "
+                                    f"{memory_error}"
+                                )
+                                if memory_attempt == max_memory_attempts:
+                                    raise
+                                time.sleep(0.15)
 
                         execution_context["semantic_memory_results"] = semantic_memory_results
                         self.execution_logger.set_semantic_memory_results(semantic_memory_results)
@@ -1646,6 +1673,35 @@ class ExecutionEngine:
 
                     execution_result = fallback_result["message"]
                     completed_tasks[task_id] = fallback_result
+
+                    # A failed fallback is terminal for this turn. In particular,
+                    # downstream tasks must not consume missing intermediate data
+                    # simply because the failed task_id exists in completed_tasks.
+                    # Do not roll back the entire snapshot here: earlier tasks
+                    # may already have committed gameplay/NPC/memory changes.
+                    if not fallback_result.get("success", False):
+                        final_state = self.game_state_manager.get_state()
+                        self.execution_logger.finish_turn(
+                            state_after=final_state,
+                            final_response=execution_result
+                        )
+                        task_elapsed = time.perf_counter() - task_started
+                        task_timings.append({
+                            "task_id": task_id,
+                            "agent": agent_type,
+                            "seconds": task_elapsed
+                        })
+                        task_timing_recorded = True
+                        self._print_task_timing(
+                            task_id=task_id,
+                            agent_type=agent_type,
+                            elapsed_seconds=task_elapsed
+                        )
+                        self._print_turn_profile(
+                            turn_started=turn_started,
+                            task_timings=task_timings
+                        )
+                        return execution_result
 
                     if agent_type == "narrative":
                         final_state = self.game_state_manager.get_state()

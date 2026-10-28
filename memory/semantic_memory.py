@@ -3,6 +3,7 @@ import time
 import uuid
 import shutil
 import os
+import re
 from typing import Dict, Any, List, Optional
 
 from langchain_core.documents import Document
@@ -44,7 +45,9 @@ class SemanticMemorySystem:
         intent = str(event.get("intent", "")).lower()
         target = str(event.get("target", "")).lower()
 
-        combined_text = f"{player_input} {system_result}"
+        # Classify service requests from the player's words only. NPC speech
+        # can mention unrelated services without the player requesting them.
+        combined_text = player_input
 
         drink_words = [
             "drink", "ale", "beer", "wine", "mead", "glass", "cup", "bottle"
@@ -68,11 +71,10 @@ class SemanticMemorySystem:
             "flirt", "flirty", "wink", "compliment", "appearance", "smile"
         ]
 
-        attack_words = [
-            "attack", "hit", "strike", "stab", "kill", "hurt", "damage"
-        ]
-
-        if intent == "combat_action" or any(word in combined_text for word in attack_words):
+        # Combat is an executed action, not a keyword in a question or NPC reply.
+        # In particular, "strike a deal" and "establishments" must never
+        # create false records of an attack.
+        if intent == "combat_action":
             return "attack"
 
         if intent == "tavern_action" and any(word in combined_text for word in drink_words):
@@ -109,25 +111,28 @@ class SemanticMemorySystem:
 
         text = query.lower()
 
-        if any(word in text for word in ["drink", "drinks", "ale", "beer", "wine", "mead", "order", "orders"]):
+        def mentions(*words: str) -> bool:
+            return any(re.search(r"\b" + re.escape(word) + r"\b", text) for word in words)
+
+        if mentions("drink", "drinks", "ale", "beer", "wine", "mead", "order", "orders"):
             return "drink_order"
 
-        if any(word in text for word in ["room", "rent", "sleep", "rest"]):
+        if mentions("room", "rent", "sleep", "rest"):
             return "room_rental"
 
-        if any(word in text for word in ["food", "meal"]):
+        if mentions("food", "meal"):
             return "food_order"
 
-        if any(word in text for word in ["rumor", "rumour", "information", "news", "strange", "weird", "odd", "nearby"]):
+        if mentions("rumor", "rumour", "information", "news", "strange", "weird", "odd", "nearby"):
             return "tavern_information"
 
-        if any(word in text for word in ["attack", "violence", "hit", "damage", "hostile", "fight"]):
+        if mentions("attack", "violence", "hit", "damage", "hostile", "fight"):
             return "attack"
 
-        if any(word in text for word in ["flirt", "wink", "compliment", "social"]):
+        if mentions("flirt", "wink", "compliment", "social"):
             return "bartender_social"
 
-        if any(word in text for word in ["talk", "dialogue", "conversation", "speak"]):
+        if mentions("talk", "dialogue", "conversation", "speak"):
             return "dialogue"
 
         return None
