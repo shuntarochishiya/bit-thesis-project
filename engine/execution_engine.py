@@ -92,6 +92,55 @@ class ExecutionEngine:
             or DialogueValidatorAgent(debug=True)
         )
 
+    def reconcile_pending_npc_events(self) -> int:
+        """Best-effort delivery of committed NPC events, without replaying gold.
+
+        Safe for duplicate delivery because NPCStateManager uses event_id.
+        Returns the number of acknowledged events in this pass.
+        """
+        if self.npc_state_manager is None:
+            return 0
+        delivered = 0
+        pending = list(self.game_state_manager.get_state().get("pending_npc_events", []))
+        for event in pending:
+            event_id = event["id"]
+            try:
+                self.npc_state_manager.apply_relationship_event(
+                    npc_id=event["npc_id"],
+                    event_type=event["event_type"],
+                    related_entity=event.get("related_entity", "player"),
+                    source=event.get("source", "experienced"),
+                    confidence=float(event.get("confidence", 1.0)),
+                    event_id=event_id,
+                )
+            except Exception as npc_error:
+                print(
+                    "[NPC SECONDARY UPDATE FAILED] "
+                    f"tavern purchase committed; target={event['npc_id']}; "
+                    f"event={event['event_type']}; "
+                    f"error={type(npc_error).__name__}: {npc_error}"
+                )
+                continue
+
+            # Acknowledgement uses fresh CAS and does not replay the purchase.
+            # A failed acknowledgement is safe: a later retry is idempotent.
+            for _ in range(3):
+                current, version = self.game_state_manager.get_state_with_version()
+                queue = current.get("pending_npc_events", [])
+                if not any(item.get("id") == event_id for item in queue):
+                    delivered += 1
+                    break
+                new_queue = [item for item in queue if item.get("id") != event_id]
+                if self.game_state_manager.update_state(
+                    {"pending_npc_events": new_queue},
+                    source="ExecutionEngine",
+                    reason=f"Acknowledge NPC event {event_id}",
+                    expected_version=version,
+                ):
+                    delivered += 1
+                    break
+        return delivered
+
     def apply_state_updates(
         self,
         updates: Dict[str, Any],
@@ -537,6 +586,9 @@ class ExecutionEngine:
         execution_levels = self.dag_scheduler.build_execution_levels(plan)
         formatted_execution_levels = self.dag_scheduler.format_execution_levels(execution_levels)
         self.execution_logger.set_dag_execution_levels(formatted_execution_levels)
+
+        # Retry events from earlier committed turns before this turn starts.
+        self.reconcile_pending_npc_events()
 
         snapshot_id = self.game_state_manager.create_snapshot(
             label=f"Before action | intent={intent} | target={target} | input={player_input}"
@@ -1463,49 +1515,37 @@ class ExecutionEngine:
                             result = self.build_blocked_action_result(execution_context)
                         else:
                             result = self.tavern_agent.execute(
-                                game_state,
-                                player_input=player_input
+                                game_state, player_input=player_input
                             )
 
+                        result_data = result.get("data", {})
+                        relationship_event = result_data.get("relationship_event")
+                        updates = dict(result["state_updates"])
+                        if result.get("success") and relationship_event and target:
+                            from uuid import uuid4
+                            pending = list(game_state.get("pending_npc_events", []))
+                            pending.append({
+                                "id": f"npc_tx_{uuid4().hex}",
+                                "npc_id": target,
+                                "event_type": relationship_event,
+                                "related_entity": result_data.get("related_entity", "player"),
+                                "source": result_data.get("memory_source", "experienced"),
+                                "confidence": float(result_data.get("memory_confidence", 1.0)),
+                            })
+                            updates["pending_npc_events"] = pending
+
+                        # Gold and outbox event commit together under one CAS.
                         self.apply_state_updates(
-                            updates=result["state_updates"],
+                            updates=updates,
                             source="TavernAgent",
                             reason=result["message"],
                             snapshot_id=snapshot_id,
                             expected_version=state_version,
                         )
-
-                        # A successful tavern transaction may also be a meaningful
-                        # NPC relationship event. Record it only AFTER the
-                        # authoritative gameplay transaction succeeded.
-                        result_data = result.get("data", {})
-                        relationship_event = result_data.get("relationship_event")
-
-                        if (
-                            result.get("success")
-                            and relationship_event
-                            and self.npc_state_manager is not None
-                            and target
-                        ):
-                            self.npc_state_manager.apply_relationship_event(
-                                npc_id=target,
-                                event_type=relationship_event,
-                                related_entity=result_data.get(
-                                    "related_entity", "player"
-                                ),
-                                source=result_data.get(
-                                    "memory_source", "experienced"
-                                ),
-                                confidence=float(
-                                    result_data.get("memory_confidence", 1.0)
-                                ),
-                            )
+                        if result.get("success") and relationship_event:
+                            self.reconcile_pending_npc_events()
 
                         execution_result = result["message"]
-
-                        # TavernAgent handles deterministic tavern services
-                        # itself: entering/leaving, food, drinks and rooms.
-                        # Its result must not be rewritten by NarrativeAgent.
                         player_response = result["message"]
                         completed_tasks[task_id] = result
 

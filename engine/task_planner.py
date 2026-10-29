@@ -72,6 +72,13 @@ class TaskPlanner:
                 dependency for dependency in task.get("depends_on", [])
                 if dependency in retained_ids
             ]
+
+        for task in shortened:
+            if task["task_id"] == "apply_dialogue_result":
+                dependencies = task.setdefault("depends_on", [])
+                if "evaluate_consequences" not in dependencies:
+                    dependencies.append("evaluate_consequences")
+                break
         return shortened
 
     def build_plan(

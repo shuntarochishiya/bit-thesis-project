@@ -1,8 +1,8 @@
-
 import copy
 from datetime import datetime
 from threading import RLock
 from typing import Dict, Any, List, Optional, Tuple
+from state.sqlite_state_store import SQLiteStateStore
 
 
 class GameStateManager:
@@ -19,7 +19,7 @@ class GameStateManager:
     - validation before committing updates
     """
 
-    def __init__(self):
+    def __init__(self, persistence_path=None):
         self.state: Dict[str, Any] = {
             "location": "old forest",
 
@@ -52,6 +52,7 @@ class GameStateManager:
             "crime_level": 0,
             "active_conflicts": [],
             "pending_events": [],
+            "pending_npc_events": [],
             "recent_events": []
         }
 
@@ -60,6 +61,25 @@ class GameStateManager:
         self.audit_log: List[Dict[str, Any]] = []
 
         self._lock = RLock()
+        self._store = SQLiteStateStore(persistence_path) if persistence_path else None
+        if self._store:
+            loaded = self._store.load("game")
+            if loaded is not None:
+                if not self._validate_state_data(loaded["state"]):
+                    raise ValueError("Invalid persisted game state")
+                self.state = loaded["state"]
+                self.version = loaded["version"]
+                self.snapshots = loaded["snapshots"]
+                self.audit_log = loaded["audit_log"]
+            else:
+                self._persist()
+
+    def _persist(self):
+        if self._store:
+            self._store.save("game", {
+                "state": self.state, "version": self.version,
+                "snapshots": self.snapshots, "audit_log": self.audit_log,
+            })
 
     # ============================================================
     # STATE ACCESS
@@ -115,7 +135,11 @@ class GameStateManager:
             }
 
             self.snapshots.append(snapshot)
-
+            try:
+                self._persist()
+            except Exception:
+                self.snapshots.pop()
+                raise
             return snapshot_id
 
     # ============================================================
@@ -172,6 +196,13 @@ class GameStateManager:
                 "changes": copy.deepcopy(changes)
             })
 
+            try:
+                self._persist()
+            except Exception:
+                self.state = old_state
+                self.version -= 1
+                self.audit_log.pop()
+                raise
             return True
 
     # ============================================================
@@ -255,6 +286,13 @@ class GameStateManager:
                 "changes": copy.deepcopy(changes)
             })
 
+            try:
+                self._persist()
+            except Exception:
+                self.state = old_state
+                self.version -= 1
+                self.audit_log.pop()
+                raise
             return True
 
     # ============================================================
@@ -341,6 +379,7 @@ class GameStateManager:
             "inventory",
             "active_conflicts",
             "pending_events",
+            "pending_npc_events",
             "recent_events"
         ]
 

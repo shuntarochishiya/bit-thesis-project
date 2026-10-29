@@ -1,7 +1,10 @@
+
 from __future__ import annotations
 
 from typing import Any
 import re
+import os
+from pathlib import Path
 
 from config import (
     create_llm,
@@ -70,9 +73,13 @@ class OrchestrationAgent:
         # State managers
         # =========================================================
 
-        self.game_state_manager = GameStateManager()
+        # Opt-in SQLite persistence: set RPG_STATE_DB before starting uvicorn.
+        # Both managers use the same database and retain their identities.
+        configured_db = os.environ.get("RPG_STATE_DB", "").strip()
+        persistence_path = Path(configured_db).expanduser().resolve() if configured_db else None
+        self.game_state_manager = GameStateManager(persistence_path=persistence_path)
         self.context_manager = ContextManager()
-        self.npc_state_manager = NPCStateManager()
+        self.npc_state_manager = NPCStateManager(persistence_path=persistence_path)
 
         # =========================================================
         # Memory systems
@@ -245,22 +252,7 @@ class OrchestrationAgent:
             target,
         )
 
-        # Build a fresh, validated DAG from the authoritative state snapshot.
-        # Existing intent-only templates remain the default for normal turns.
-        npc_context: dict[str, Any] = {}
-        if intent == "dialogue_action" and target:
-            try:
-                npc_context = self.npc_state_manager.build_simulation_context(target)
-            except (KeyError, ValueError):
-                # Unknown targets keep the standard, validated dialogue DAG.
-                npc_context = {}
-
-        plan = self.task_planner.build_plan(
-            intent=intent,
-            game_state=state_before,
-            target=target,
-            npc_context=npc_context,
-        )
+        plan = self.task_planner.build_plan(intent)
 
         self.execution_logger.set_dag(plan)
 

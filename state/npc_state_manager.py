@@ -1,9 +1,11 @@
 import copy
 from datetime import datetime
 from uuid import uuid4
+from threading import RLock
 from typing import Any, Dict, List, Optional
 
 from state.npc_profiles import NPCProfiles
+from state.sqlite_state_store import SQLiteStateStore
 
 
 class NPCStateManager:
@@ -14,13 +16,32 @@ class NPCStateManager:
         "afraid", "angry", "hostile", "sad", "stressed", "alert", "friendly",
     }
 
-    def __init__(self):
+    def __init__(self, persistence_path=None):
         self.states: Dict[str, Dict[str, Any]] = {
             npc_id: self._build_default_state(npc_id)
             for npc_id in NPCProfiles.list_npc_ids()
         }
         self.audit_log: List[Dict[str, Any]] = []
         self.version = 0
+        self._relationship_lock = RLock()
+        self._store = SQLiteStateStore(persistence_path) if persistence_path else None
+        if self._store:
+            loaded = self._store.load("npc")
+            if loaded is not None:
+                self.states = loaded["states"]
+                self.version = loaded["version"]
+                self.audit_log = loaded["audit_log"]
+                if not all(self.validate_state(npc_id) for npc_id in self.states):
+                    raise ValueError("Invalid persisted NPC state")
+            else:
+                self._persist()
+
+    def _persist(self):
+        if getattr(self, "_store", None):
+            self._store.save("npc", {
+                "states": self.states, "version": self.version,
+                "audit_log": self.audit_log,
+            })
 
     def _build_default_state(self, npc_id: str) -> Dict[str, Any]:
         profile = NPCProfiles.get_profile(npc_id)
@@ -42,6 +63,7 @@ class NPCStateManager:
             "last_action": None,
             "last_interaction": None,
             "personal_memory": [],
+            "applied_relationship_event_ids": [],
             "semantic_beliefs": {},
             "relationship_modifiers": {},
             "status_effects": [],
@@ -81,29 +103,38 @@ class NPCStateManager:
             return "calm"
         return "neutral"
 
-    def update_state(
-        self,
-        npc_id: str,
-        updates: Dict[str, Any],
-        source: str = "unknown",
-        reason: str = ""
-    ):
+    def update_state(self, npc_id: str, updates: Dict[str, Any],
+                     source: str = "unknown", reason: str = ""):
         npc_id = NPCProfiles.normalize_npc_id(npc_id)
-        before = self.get_state(npc_id)
-        self.states[npc_id].update(copy.deepcopy(updates))
-        self._normalize_state(npc_id)
-        if not self.validate_state(npc_id):
-            self.states[npc_id] = before
-            raise ValueError(f"Invalid NPC state update for {npc_id}; changes rolled back.")
-        self.version += 1
-        self.audit_log.append({
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
-            "version": self.version,
-            "npc_id": npc_id,
-            "source": source,
-            "reason": reason,
-            "changes": self._calculate_changes(before, self.states[npc_id]),
-        })
+        with self._relationship_lock:
+            before = self.get_state(npc_id)
+            candidate = copy.deepcopy(before)
+            candidate.update(copy.deepcopy(updates))
+            # Validate candidate without exposing it to other threads.
+            staged_states = self.states
+            self.states = {**self.states, npc_id: candidate}
+            try:
+                self._normalize_state(npc_id)
+                if not self.validate_state(npc_id):
+                    raise ValueError(f"Invalid NPC state update for {npc_id}")
+                next_states = self.states
+                next_version = self.version + 1
+                next_audit = self.audit_log + [{
+                    "timestamp": datetime.now().isoformat(timespec="seconds"),
+                    "version": next_version, "npc_id": npc_id,
+                    "source": source, "reason": reason,
+                    "changes": self._calculate_changes(before, next_states[npc_id]),
+                }]
+                if getattr(self, "_store", None):
+                    self._store.save("npc", {
+                        "states": next_states, "version": next_version,
+                        "audit_log": next_audit,
+                    })
+                self.version = next_version
+                self.audit_log = next_audit
+            except Exception:
+                self.states = staged_states
+                raise
 
     def apply_emotional_change(
         self,
@@ -329,6 +360,58 @@ class NPCStateManager:
         return None
 
     def apply_relationship_event(
+        self,
+        npc_id: str,
+        event_type: str,
+        related_entity: str = "player",
+        source: str = "experienced",
+        confidence: float = 1.0,
+        event_id: Optional[str] = None,
+    ):
+        """Atomic NPC relationship + memory + belief update with idempotency.
+
+        The existing three-stage logic runs on a private copy. Only its final
+        validated NPC state is committed to the live manager. A retry with the
+        same event_id is a no-op, even if the first call succeeded but its
+        acknowledgement was lost. Event IDs should be unique per transaction.
+        """
+        normalized_id = NPCProfiles.normalize_npc_id(npc_id)
+        with self._relationship_lock:
+            before = self.get_state(normalized_id)
+            applied_ids = before.get("applied_relationship_event_ids", [])
+            if event_id is not None and event_id in applied_ids:
+                return None
+
+            staged = NPCStateManager.__new__(NPCStateManager)
+            staged.states = copy.deepcopy(self.states)
+            staged.audit_log = []
+            staged.version = self.version
+            staged._relationship_lock = RLock()
+            memory = staged._apply_relationship_event_unchecked(
+                npc_id=normalized_id,
+                event_type=event_type,
+                related_entity=related_entity,
+                source=source,
+                confidence=confidence,
+            )
+            candidate = staged.get_state(normalized_id)
+            if event_id is not None:
+                candidate["applied_relationship_event_ids"] = list(applied_ids) + [event_id]
+                if memory is not None:
+                    for entry in candidate["personal_memory"]:
+                        if entry.get("id") == memory.get("id"):
+                            entry.setdefault("metadata", {})["transaction_event_id"] = event_id
+                            break
+
+            # Single validated commit; no partial trust/memory/belief updates.
+            self.update_state(
+                normalized_id, candidate,
+                source="NPCStateManager",
+                reason=f"Atomic relationship event: {event_type}",
+            )
+            return memory
+
+    def _apply_relationship_event_unchecked(
         self,
         npc_id: str,
         event_type: str,
