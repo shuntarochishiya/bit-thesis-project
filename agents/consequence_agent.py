@@ -377,7 +377,20 @@ class ConsequenceAgent:
                 )
             )
 
-            if merchant_is_hostile and asking_for_trade_or_discount:
+            if (
+                merchant_is_hostile
+                and asking_for_trade_or_discount
+                and not any(
+                    phrase in input_text
+                    for phrase in [
+                        "sorry",
+                        "apologize",
+                        "apologise",
+                        "forgive me",
+                        "my mistake"
+                    ]
+                )
+            ):
                 result["allow_action"] = False
 
                 result["reason"] = (

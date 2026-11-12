@@ -252,7 +252,24 @@ class OrchestrationAgent:
             target,
         )
 
-        plan = self.task_planner.build_plan(intent)
+        # Build a context-aware DAG using the current authoritative state.
+        npc_context = None
+
+        if intent == "dialogue_action" and target:
+            try:
+                npc_context = {
+                    "state": self.npc_state_manager.get_state(target)
+                }
+            except (KeyError, ValueError):
+                # Unknown or unsupported targets retain the ordinary DAG.
+                npc_context = None
+
+        plan = self.task_planner.build_plan(
+            intent=intent,
+            game_state=state_before,
+            target=target,
+            npc_context=npc_context,
+        )
 
         self.execution_logger.set_dag(plan)
 

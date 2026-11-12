@@ -30,7 +30,7 @@ class DialogueGeneratorAgent:
     """
 
     DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
-    DEFAULT_MODEL = "mistral"
+    DEFAULT_MODEL = "qwen2.5:3b"
 
     def __init__(
         self,
@@ -405,6 +405,9 @@ Current emotion: {emotion}; tone: {tone}; attitude: trust={dialogue_context.get(
 Decision: {npc_intent}; topic={topic}; trade_allowed={allow_trade}; refusing={refuses_conversation}.
 Verified world context:
 {world_context}
+- The current game state is authoritative.
+- Past memories may describe previous locations.
+- Never present a location from past memories as the player's current location.
 Recent dialogue:
 {conversation_text}
 Relevant past events (may be incomplete; do not assume they are current facts):
@@ -449,6 +452,7 @@ NPC:""".strip()
         Exposes only a limited set of safe world-state fields.
         """
         allowed_keys = [
+            "location",
             "current_location",
             "active_location",
             "world_mood",
