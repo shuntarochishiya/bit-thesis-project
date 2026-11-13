@@ -113,6 +113,7 @@ class MemorySystem:
         }
 
         matched: List[Dict[str, str]] = []
+        latest_substantive: Optional[Dict[str, str]] = None
 
         for item in reversed(self.events):
             if not isinstance(item, dict):
@@ -138,14 +139,25 @@ class MemorySystem:
             npc_text = str(item.get("system_result") or "").strip()
 
             if player_text or npc_text:
-                matched.append({
+                turn = {
                     "player": player_text,
                     "npc": npc_text,
-                })
+                    "intent": item_intent,
+                }
+                if len(matched) < max(1, limit):
+                    matched.append(turn)
+                # Keep one substantive exchange as a topic anchor even after
+                # multiple purchases. A newer unrelated exchange supersedes it.
+                if item_intent != "tavern_action" and latest_substantive is None:
+                    latest_substantive = turn
+                if len(matched) >= max(1, limit) and latest_substantive is not None:
+                    break
 
-            if len(matched) >= max(1, limit):
-                break
-
+        # When the last N turns were only service actions, prepend the last
+        # actual conversation so follow-ups retain their referent. Do not
+        # expose other NPCs or cross movement/combat/reset boundaries.
+        if latest_substantive is not None and latest_substantive not in matched:
+            matched.append(latest_substantive)
         matched.reverse()
         return matched
 

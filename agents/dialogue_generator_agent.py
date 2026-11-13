@@ -7,6 +7,13 @@ import re
 import requests
 
 from agents.dialogue_validator_agent import DialogueValidatorAgent
+from agents.world_facts import (
+    grounded_reply, grounded_followup_reply, is_context_followup,
+    is_news_question, is_news_followup, is_stock_question, news_followup_anchor,
+    grounded_news_reply, confirmed_shipments, format_verified_events, _verified_stock,
+    missing_investigation_topic, information_request_kind, information_response_issue,
+    creative_followup_anchor, missing_followup_subject,
+)
 
 
 class DialogueGeneratorAgent:
@@ -132,7 +139,11 @@ class DialogueGeneratorAgent:
         # to invent a shared memory. When there is no supporting NPC-specific
         # record, answer deterministically instead of trusting an LLM to deny it.
         # This guard is deliberately limited to past-sale claims.
-        if self._is_unverified_personal_sale(dialogue_context):
+        refuses = bool(data.get("refuses_conversation") or dialogue_context.get("hostile"))
+        refuses = refuses or str(data.get("npc_intent", "")).lower() in {
+            "refuse_trade", "refuse_conversation", "order_player_to_leave", "avoid_player"
+        }
+        if self._is_unverified_personal_sale(dialogue_context) and not refuses:
             if self.debug:
                 print("[NPC MEMORY GUARD] Unverified personal sale; using grounded reply.")
             return self._build_success_result(
@@ -147,6 +158,13 @@ class DialogueGeneratorAgent:
                     "reason": "Unverified past sale handled without LLM generation.",
                 },
             )
+
+        # LLM-first: news, stock questions, and contextual follow-ups all reach
+        # Ollama. Grounding facts are supplied in the prompt and checked again
+        # after generation. Only errors/unsafe output use deterministic text.
+        target = str(dialogue_context.get("target", ""))
+        player_input = str(dialogue_context.get("player_input", ""))
+        history = dialogue_context.get("conversation_history", [])
 
         start_time = time.perf_counter()
 
@@ -167,7 +185,11 @@ class DialogueGeneratorAgent:
                 else:
                     if self.debug:
                         print("[NPC REPLY] No complete valid reply; using contextual fallback.")
-                    generated_reply = self._truncation_fallback(data, dialogue_context)
+                    generated_reply = (
+                        grounded_followup_reply(game_state, target, player_input, history)
+                        or grounded_reply(game_state, target, player_input)
+                        or self._truncation_fallback(data, dialogue_context)
+                    )
                     response_source = "deterministic_fallback"
 
             generation_time = round(
@@ -178,24 +200,68 @@ class DialogueGeneratorAgent:
             validation = self._validate_reply(
                 generated_reply=generated_reply,
                 data=data,
-                dialogue_context=dialogue_context
+                dialogue_context=dialogue_context,
             )
+            # The same factual/role validator that ExecutionEngine uses must
+            # also run here. Otherwise invalid LLM output gets replaced by a
+            # canned response without giving the model a chance to correct it.
+            def check_full(reply: str) -> Dict[str, Any]:
+                local = self._validate_reply(reply, data, dialogue_context)
+                if not local["valid"]:
+                    return local
+                request_issue = information_response_issue(
+                    information_request_kind(player_input, target), reply,
+                    game_state, target,
+                )
+                if request_issue:
+                    return {"valid": False, "reason": request_issue}
+                if missing_followup_subject(player_input, history, reply):
+                    return {
+                        "valid": False,
+                        "reason": "The player asked to expand the previous topic. Start with that "
+                                  "subject before introducing any other ideas or rumors.",
+                    }
+                checked = DialogueValidatorAgent(debug=False).validate(
+                    {"success": True, "player_response": reply, "data": {}},
+                    dialogue_decision=dialogue_result,
+                    game_state=game_state,
+                )
+                status = checked.get("data", {}).get("dialogue_validation", {})
+                if not status.get("valid", False):
+                    return {"valid": False, "reason": "; ".join(status.get("errors", []))}
+                return {"valid": True, "reason": ""}
 
-            if not validation["valid"]:
+            validation = check_full(generated_reply) if response_source != "deterministic_fallback" else validation
+            if not validation["valid"] and response_source != "deterministic_fallback":
                 if self.debug:
-                    print(
-                        "[DEBUG] Dialogue validation failed: "
-                        f"{validation['reason']}"
+                    print(f"[NPC REPLY] Rejected first LLM draft: {validation['reason']}")
+                    print(f"[NPC REPLY] Rejected draft text: {generated_reply[:500]!r}")
+                # Build a fresh, compact prompt rather than repeating the
+                # entire history (which can include the very bad answer that
+                # caused the failure). This also saves prompt-evaluation time.
+                repair_prompt = self._build_repair_prompt(
+                    data, dialogue_context, game_state, validation["reason"]
+                )
+                repaired = self._call_ollama(repair_prompt)
+                if self._reply_looks_truncated(repaired):
+                    repaired = self._salvage_complete_reply(repaired)
+                repair_validation = check_full(repaired)
+                if repair_validation["valid"]:
+                    generated_reply = repaired
+                    validation = repair_validation
+                    response_source = "llm_repaired"
+                else:
+                    if self.debug:
+                        print(f"[NPC REPLY] Repair rejected: {repair_validation['reason']}")
+                        print(f"[NPC REPLY] Rejected repair text: {repaired[:500]!r}")
+                    generated_reply = (
+                        grounded_followup_reply(game_state, target, player_input, history)
+                        or grounded_reply(game_state, target, player_input)
+                        or self._truncation_fallback(data, dialogue_context)
                     )
-
-                generated_reply = self._truncation_fallback(
-                    data=data,
-                    dialogue_context=dialogue_context
-                )
-                response_source = "deterministic_fallback"
-                validation = self._validate_reply(
-                    generated_reply, data, dialogue_context
-                )
+                    response_source = "deterministic_fallback"
+                    validation = {"valid": True, "reason": "Both LLM drafts rejected; safe fallback."}
+            generation_time = round(time.perf_counter() - start_time, 3)
 
             return self._build_success_result(
                 dialogue_result=dialogue_result,
@@ -213,10 +279,11 @@ class DialogueGeneratorAgent:
                 3
             )
 
-            fallback_reply = self._generate_fallback_reply(
-                data=data,
-                dialogue_context=dialogue_context
-            )
+            fallback_reply = (
+                grounded_followup_reply(game_state, target, player_input, history)
+                or grounded_reply(game_state, target, player_input)
+                or self._generate_fallback_reply(data, dialogue_context)
+            ) if not refuses else self._generate_fallback_reply(data, dialogue_context)
 
             if self.debug:
                 print(
@@ -237,6 +304,54 @@ class DialogueGeneratorAgent:
                 },
                 generation_error=str(error)
             )
+
+    def _build_repair_prompt(
+        self,
+        data: Dict[str, Any],
+        context: Dict[str, Any],
+        game_state: Dict[str, Any],
+        failure_reason: str,
+    ) -> str:
+        """Retry with verified facts, NOT a second copy of bad memories.
+
+        Applicable to every NPC; no merchant-specific dialogue script.
+        """
+        target = str(context.get("target", "NPC"))
+        player_input = str(context.get("player_input", ""))
+        personality = context.get("personality") or context.get("profile", {}).get("personality", {})
+        request_kind = information_request_kind(player_input, target)
+        voice = context.get("voice") or context.get("profile", {}).get("voice", "")
+        facts = [
+            f"Role: {target}",
+            f"Role restrictions: {self._role_guidance(target)}",
+            f"Personality: {self._format_value(personality)}",
+            f"Characteristic speaking style: {voice or 'Follow the NPC personality.'}",
+            f"Relationship: trust={context.get('trust', 'unknown')}, hostile={context.get('hostile', False)}",
+            f"Current location: {game_state.get('location', 'unknown')}",
+            f"Confirmed public events: {format_verified_events(game_state, target)}",
+        ]
+        if request_kind in {"stock_overview", "stock_updates"}:
+            stock = _verified_stock(game_state, target)
+            facts.append("Verified stock: " + ("unknown" if stock is None else str(stock)))
+            facts.append("Confirmed deliveries: " + str(confirmed_shipments(game_state, target)))
+        if request_kind == "world_news":
+            facts.append("Rumor topic guidance: " + grounded_news_reply(game_state, target))
+        history = context.get("conversation_history", [])
+        anchor = creative_followup_anchor(player_input, history)
+        if anchor:
+            facts.append("Prior rumor being discussed (unconfirmed): " + str(anchor.get("npc", ""))[:240])
+        facts_text = "\n".join(facts)
+        return (
+            "Speak as a lively, believable fantasy NPC directly to the player. "
+            "Your PREVIOUS answer was unsuitable: " + failure_reason + ". "
+            "Try a fresh response, NOT a technical disclaimer or paraphrase of your prior answer. "
+            "Answer the player's actual latest question in your own words. "
+            "You may invent imaginative wares, rumors, places and stories. Do not claim "
+            "a mechanical transaction, inventory transfer, or quest completion "
+            "unless the game state authorizes it. Stay on the conversation subject. "
+            "No narration or role labels. Keep it to 1-3 natural sentences.\n" +
+            facts_text + "\nPlayer: " + player_input + "\nNPC:"
+        )
 
     # =========================================================
     # Prompt construction
@@ -362,6 +477,11 @@ class DialogueGeneratorAgent:
             dialogue_context
         )
 
+        # A semantic hit containing an old, incorrect merchant answer is not
+        # authoritative stock evidence. Avoid letting repeated delivery-news
+        # responses dominate prompts about the *current* assortment.
+        if information_request_kind(player_input, target) == "stock_overview":
+            memories = [m for m in memories if not self._stale_stock_answer(m)]
         memory_text = self._format_memories(memories)
 
         semantic_beliefs = dialogue_context.get(
@@ -379,13 +499,84 @@ class DialogueGeneratorAgent:
         conversation_text = self._format_conversation_history(
             conversation_history
         )
+        # A tavern purchase is a side action, not a new dialogue topic. Give
+        # Qwen the earlier news turn explicitly when the player resumes it.
+        news_anchor = creative_followup_anchor(player_input, conversation_history)
+        if news_anchor:
+            anchor_reply = str(news_anchor.get("npc") or "")[:350]
+            followup_guidance = (
+                "This is a follow-up to an EARLIER NPC story or report, even "
+                "if a drink purchase or other service happened in between. "
+                "Continue THAT topic, not the drink order. Earlier NPC words: "
+                + repr(anchor_reply)
+                + ". The player is reacting to that story; respond to their "
+                  "intention naturally. This is NOT a quest acceptance or a "
+                  "confirmed event. Inventing new details of the SAME story is allowed. "
+                "If the player says they will investigate, acknowledge the "
+                "specific earlier rumor rather than asking what they mean."
+            )
+        elif is_context_followup(player_input, conversation_history):
+            followup_guidance = (
+                "This is a follow-up to the last substantive NPC conversation "
+                "(not an intervening service transaction). Address that "
+                "specific topic directly. Earlier NPC claims are not world facts."
+            )
+        else:
+            followup_guidance = ""
         personality_text = self._format_value(personality)
         goals_text = self._format_value(goals)
+        voice_text = str(dialogue_context.get("voice") or profile.get("voice") or "Follow the NPC personality.")
 
         world_context = self._build_world_context(
             game_state
         )
+        verified_event_text = format_verified_events(game_state, target)
+        verified_stock = _verified_stock(game_state, target) if target == "merchant" else None
+        stock_text = (
+            "Not supplied / unknown" if verified_stock is None
+            else (", ".join(verified_stock) if verified_stock else "Confirmed empty")
+        )
 
+        # Read-only facts for the model. These are NOT generated responses.
+        # Even a stock/news request must pass through Ollama.
+        fact_guidance = ""
+        request_kind = information_request_kind(player_input, target)
+        if request_kind == "world_news":
+            fact_guidance = (
+                "The player is asking for news: share an engaging story or rumor "
+                "in your own character voice. You may creatively invent rumors, "
+                "people and places. A rumor told in dialogue is not a mechanically "
+                "completed game event."
+            )
+        elif request_kind == "stock_updates":
+            shipments = confirmed_shipments(game_state, target)
+            fact_guidance = (
+                "The player is asking about NEW DELIVERIES, not the full catalog. "
+                + ("No completed deliveries are recorded in mechanical state. " if not shipments
+                   else "Recorded deliveries: " + str(shipments[-2:])[:400] + ". ")
+                + "Answer the delivery question directly. Stories about other "
+                  "possible shipments are fine, but do not mark a delivery complete."
+            )
+        elif request_kind == "stock_overview":
+            fact_guidance = (
+                "The player asks what is AVAILABLE FOR SALE IN GENERAL, not what "
+                "was recently delivered. Do NOT answer with news about shipments. "
+                + ("Freely describe colorful goods you might carry and entice "
+                   "the player to browse. A spoken offer is not an inventory "
+                   "transfer or completed sale. Do not mention missing records. "
+                   if verified_stock is None else
+                   "Recorded inventory: " + stock_text + ". You may "
+                   "offer imaginative goods conversationally; only the recorded "
+                   "inventory can be transferred by a purchase action. ")
+                + "Respond to their latest request rather than repeating your previous answer."
+            )
+        elif is_news_followup(player_input, conversation_history):
+            fact_guidance = (
+                "The player is following up on an EARLIER NPC report or rumor. "
+                "Begin by developing the previous story rather than switching "
+                "subjects. You can invent imaginative details, but do not "
+                "execute game events through dialogue."
+            )
         role_guidance = self._role_guidance(target)
 
         # Keep the prompt compact. Past event records can contain full game-state
@@ -400,33 +591,59 @@ class DialogueGeneratorAgent:
         return f"""You are the {target}, speaking directly to the player in a fantasy RPG.
 Role boundaries: {role_guidance}
 Personality: {personality_text}
+Characteristic speaking style: {voice_text}
 Goals: {goals_text}
 Current emotion: {emotion}; tone: {tone}; attitude: trust={dialogue_context.get('trust', 'unknown')}, hostile={dialogue_context.get('hostile', False)}.
 Decision: {npc_intent}; topic={topic}; trade_allowed={allow_trade}; refusing={refuses_conversation}.
 Verified world context:
 {world_context}
+Recorded game events (mechanical state; dialogue may invent additional stories):
+{verified_event_text}
+Merchant inventory tracked by game mechanics: {stock_text}
+Situation-specific grounding guidance: {fact_guidance or "Normal conversation; no special factual claim required."}
 - The current game state is authoritative.
 - Past memories may describe previous locations.
+- Past NPC replies are narrative continuity: keep established story details consistent, but they do not mutate game state.
+- Do not mechanically resolve pending events just by talking about them.
+- You may introduce new places, people and rumors as creative fiction.
 - Never present a location from past memories as the player's current location.
 Recent dialogue:
 {conversation_text}
+{followup_guidance}
 Relevant past events (may be incomplete; do not assume they are current facts):
 {memory_text}
 Personal beliefs (opinions, not objective facts):
 {belief_text}
 
 Rules:
-- Answer the player's ACTUAL latest question first. Stay in character and speak in first person only.
+- Answer the player's ACTUAL latest question, in character, in first person.
 - {opening_rule}
-- Usually 1-2 concise sentences; up to 3 only if the question needs detail. No speeches or repeated sales pitches.
-- Keep natural personality, but do not repeat wording from recent NPC replies.
-- Do not invent a confirmed inventory item, fixed price, completed sale, action, or event.
-- If no verified price or stock data is supplied, say you cannot confirm it; do not invent a price.
-- Do not confuse your occupation with another NPC's. Do not claim to remember a past event without supporting evidence.
-- No narration, role labels, system explanations, or commentary.
+- Usually 1-3 engaging sentences; expand when explicitly asked for a story.
+- Follow-up requests such as "tell me more" or "can you tell me more? I seek adventures" refer to the most recent substantive NPC story, even across service transactions.
+- On a follow-up, elaborate on that subject FIRST. You may add new creative details of that subject; do not abruptly substitute a different story.
+- Feel free to invent wares, rumors, locations, lore and atmosphere. Creative dialogue does not itself change authoritative world state.
+- Never claim that money, inventory, health, quests, or other mechanical state changed unless the action result explicitly says so.
+- Previously established narrative details should remain consistent when revisited; do not contradict the current game's mechanics.
+- No narration, speaker labels, system explanations, or technical inventory disclaimers.
 
 Player: {player_input}
 NPC:""".strip()
+
+    @staticmethod
+    def _stale_stock_answer(memory: str) -> bool:
+        """Filter prior delivery-only dialogue, not actual recorded events."""
+        text = str(memory or "")
+        # Retrieved event records distinguish player input from the generated
+        # response. Only dialogue with a misleading delivery-only response is
+        # ignored; other episodic memories remain available.
+        if "Event type: dialogue" not in text or "System result:" not in text:
+            return False
+        response = text.split("System result:", 1)[1].split("State changes:", 1)[0]
+        return bool(re.search(
+            r"\b(?:no|not|haven't|have not|can't|cannot)\b.{0,100}"
+            r"\b(?:deliver(?:y|ies)|shipments?|restock|arrivals?)\b",
+            response, re.IGNORECASE | re.DOTALL,
+        ))
 
     @staticmethod
     def _role_guidance(target: str) -> str:
@@ -500,7 +717,7 @@ NPC:""".strip()
                 "repeat_penalty": 1.15,
 
                 # NPC does not need to generate a long essay.
-                "num_predict": 90,
+                "num_predict": 144,
 
                 # Prevent an unnecessarily large context window.
                 "num_ctx": 2048
@@ -769,7 +986,21 @@ NPC:""".strip()
 
         lines: List[str] = []
 
-        for turn in history[-2:]:
+        # MemorySystem may prepend a substantive conversation anchor when
+        # recent turns are only service transactions. Do not truncate that
+        # anchor away here: keep it plus a compact tail of recent exchanges.
+        selected = history[-3:]
+        if len(history) > 3:
+            older_substantive = next(
+                (turn for turn in reversed(history[:-3])
+                 if isinstance(turn, dict)
+                 and str(turn.get("intent") or "") != "tavern_action"),
+                None,
+            )
+            if older_substantive is not None:
+                selected = [older_substantive] + selected
+
+        for turn in selected:
             if not isinstance(turn, dict):
                 continue
 
@@ -810,10 +1041,21 @@ NPC:""".strip()
                 intent = intent_match.group(1).strip().lower() if intent_match else ""
                 if event_type == "attack" and intent == "dialogue_action":
                     event_type = "dialogue"
-                return f"{event_type or 'interaction'}: player asked {player!r}; NPC replied {reply!r}"
+                # Long-term semantic recall is NOT a verified world-fact store.
+                # Preserve what the player asked, not an old LLM assertion.
+                if event_type == "dialogue" or intent == "dialogue_action":
+                    return f"past dialogue (unverified world claims omitted): player asked {player!r}"
+                return f"past interaction (not verified world state): player asked {player!r}"
             return " ".join(text.split())[:320]
 
         if isinstance(memory, dict):
+            # A stored dialogue turn is a record of what was SAID, not proof
+            # that an NPC's old claim changed the world. Preserve the player's
+            # request for continuity, but not unverified LLM assertions.
+            if str(memory.get("intent", "")).lower() == "dialogue_action":
+                return "past dialogue (unverified): player asked " + repr(
+                    str(memory.get("player_input", ""))[:130]
+                )
             preferred_keys = [
                 "fact",
                 "event",
@@ -1149,7 +1391,8 @@ NPC:""".strip()
                 if response_source in {
                     "llm",
                     "llm_with_memory",
-                    "llm_salvaged"
+                    "llm_salvaged",
+                    "llm_repaired"
                 }
                 else None
             ),

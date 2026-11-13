@@ -3,6 +3,11 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional
 
+from agents.world_facts import (
+    grounded_reply, grounded_followup_reply, confirmed_shipments,
+    public_events, _verified_stock, is_news_question, is_news_followup, news_followup_anchor,
+)
+
 
 class DialogueValidatorAgent:
     """
@@ -185,6 +190,11 @@ class DialogueValidatorAgent:
                 "The generated dialogue claims an unverified state change: "
                 f"{state_change_claim}"
             )
+
+        # Creative worldbuilding is intentionally permitted: goods, places,
+        # rumors, legends and fictional events are narrative content, not
+        # authoritative state mutations. Mechanical changes are still checked
+        # by STATE_CHANGE_PATTERNS and the execution engine above.
 
         sentence_count = self._count_sentences(
             cleaned_reply
@@ -404,6 +414,102 @@ class DialogueValidatorAgent:
 
         return None
 
+    @staticmethod
+    def _find_unverified_world_claim(
+        reply: str,
+        game_state: Dict[str, Any],
+        target: str,
+        player_input: str = "",
+        conversation_history: Any = None,
+    ) -> Optional[str]:
+        text = str(reply or "").lower()
+        if target == "merchant" and not confirmed_shipments(game_state, target):
+            if re.search(
+                r"\b(?:we|i)\s+(?:have\s+)?(?:just\s+|recently\s+)?"
+                r"(?:received|restocked|got\s+in)\s+(?:some|new|a\s+|an\s+|the\s+)", text
+            ) or re.search(
+                r"\b(?:new|fresh|recent)\s+(?:shipment|delivery|stock|arrivals)\b", text
+            ):
+                return "Merchant claimed an unverified delivery or restock."
+
+        # When the merchant has no authoritative stock record, do not let
+        # a spontaneous LLM reply assert specific products are available.
+        if target == "merchant" and _verified_stock(game_state, target) is None:
+            if re.search(
+                r"\b(?:we|i)\s+(?:have|carry|stock|sell|offer)\s+"
+                r"(?:(?:some|a|an|new|durable|enchanted|fresh)\s+){0,4}"
+                r"(?:backpacks?|lanterns?|potions?|weapons?|swords?|"
+                r"armou?r|shields?|maps?|torches?)\b", text
+            ):
+                return "Merchant asserted unverified specific stock."
+
+        if target == "merchant" and _verified_stock(game_state, target) is None:
+            # Capture positive first-person inventory claims regardless of item
+            # noun; generic role statements ("I sell supplies") are okay.
+            claim = re.search(
+                r"\b(?:i|we)\s+(?:currently\s+)?(?:have|carry|stock|sell|offer)\s+"
+                r"(?:(?:some|a|an|new|fresh|fine|enchanted)\s+){0,3}"
+                r"([a-z][a-z -]{1,48})", text
+            )
+            if claim:
+                object_text = claim.group(1).strip().split(".")[0].split(",")[0].strip()
+                generic = {"goods", "supplies", "wares", "equipment", "items", "things",
+                           "nothing", "no idea", "no stock", "no goods", "no supplies",
+                           "a shop", "a business", "heard", "been", "time", "to"}
+                if not (object_text.startswith(("no ", "not ", "nothing", "never "))
+                        or any(object_text == word or object_text.startswith(word + " ")
+                               for word in generic)
+                        or object_text.startswith(("a feeling", "a question", "a story",
+                                                   "a suspicion", "a thought", "my doubts",
+                                                   "an idea", "some doubts", "some news"))):
+                    return "Merchant asserted specific goods without verified stock."
+
+        # Rumors and atmospheric dialogue are not world-state mutations.
+        # Do not reject a harmless "I heard whispers" phrase merely because
+        # the player's reply lacks a fixed keyword. Only reject actual
+        # contradictions, fabricated named locations, or a different rumor
+        # substituted for the topic the player is actively following up on.
+        allowed_news_context = (
+            is_news_question(player_input)
+            or is_news_followup(player_input, conversation_history)
+        )
+        if re.search(r"\b(?:dawnbreak lake|old keep)\b", text):
+            return "NPC invented a named location not present in world state."
+        if is_news_followup(player_input, conversation_history):
+            previous = str(news_followup_anchor(player_input, conversation_history).get("npc") or "").lower()
+            from agents.world_facts import RUMOR_TOPICS
+            old_topics = {i for i, (pattern, _, _) in enumerate(RUMOR_TOPICS)
+                          if pattern.search(previous)}
+            new_topics = {i for i, (pattern, _, _) in enumerate(RUMOR_TOPICS)
+                          if pattern.search(text)}
+            if old_topics and new_topics and not (old_topics & new_topics):
+                return "NPC changed the subject to a different unsupported rumor."
+
+        # Event-specific evidence, rather than merely checking that some
+        # unrelated public event exists in the journal.
+        observed = {item["event"] for item in public_events(game_state, target)}
+        event_claims = (
+            (r"\bbandits?\s+(?:have\s+)?(?:blocked|raided|attacked|ambushed)\b", "bandit_roadblock"),
+            (r"\b(?:a|an|the)\s+(?:bandit\s+)?roadblock\s+(?:was|has been)\b", "bandit_roadblock"),
+            (r"\b(?:an?\s+)?enemy\s+(?:ambushed|attacked)\b", "enemy_ambush"),
+            (r"\b(?:a|the)\s+guard\s+patrol\s+(?:arrived|passed|came|was seen)\b", "guard_patrol"),
+            (r"\b(?:a|the)\s+merchant\s+cart\s+(?:arrived|passed|came|was seen)\b", "merchant_cart"),
+        )
+        for pattern, event_id in event_claims:
+            match = re.search(pattern, text)
+            if match and event_id not in observed:
+                # A report clearly introduced as hearsay is not a claim that
+                # the event actually occurred. It remains a rumor in dialogue.
+                preceding = text[max(0, match.start() - 65):match.start()]
+                hedged = bool(re.search(
+                    r"(?:some say|people say|rumou?r(?:ed|s)?(?: that)?|"
+                    r"i(?:'ve| have) heard(?: that)?|supposedly|allegedly|"
+                    r"there is talk(?: that)?|whispers(?: that)?)\s*$", preceding
+                ))
+                if not (hedged and allowed_news_context):
+                    return f"NPC asserted unverified world event: {event_id}."
+        return None
+
     def _looks_like_narration(
         self,
         text: str
@@ -529,6 +635,23 @@ class DialogueValidatorAgent:
             return (
                 "I will not do business with you."
             )
+
+        context = data.get("dialogue_context", {})
+        if isinstance(context, dict) and not context.get("hostile"):
+            factual = grounded_reply(
+                game_state,
+                str(context.get("target", "")),
+                str(context.get("player_input", "")),
+            )
+            if factual is None:
+                factual = grounded_followup_reply(
+                    game_state,
+                    str(context.get("target", "")),
+                    str(context.get("player_input", "")),
+                    context.get("conversation_history", []),
+                )
+            if factual is not None:
+                return factual
 
         if npc_intent in {
             "greet",

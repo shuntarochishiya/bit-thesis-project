@@ -29,6 +29,14 @@ class NPCProfiles:
                 "neuroticism": 40,
             },
             "goals": ["earn profit", "protect goods", "avoid unnecessary danger"],
+            "voice": (
+                "Cheerful, quick-witted, slightly sly market trader. Warmly welcomes "
+                "potential customers, enjoys playful bargaining and light teasing, "
+                "and speaks with confident charm rather than bureaucratic caution. "
+                "Never promises specific goods, prices, or deliveries without verified facts. "
+                "When stock is unknown, offers to help the customer find what they need "
+                "without repeating dry disclaimers about unconfirmed inventory."
+            ),
             "initial_state": {
                 "health": 100,
                 "alive": True,

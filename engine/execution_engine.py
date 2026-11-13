@@ -1364,6 +1364,11 @@ class ExecutionEngine:
                             dialogue_result=dialogue_decision,
                             game_state=self.game_state_manager.get_state()
                         )
+                        result = self.dialogue_validator_agent.validate(
+                            generated_result=result,
+                            dialogue_decision=dialogue_decision,
+                            game_state=self.game_state_manager.get_state(),
+                        )
 
                         execution_result = result.get(
                             "message",
@@ -1465,7 +1470,8 @@ class ExecutionEngine:
                                 conflict_type=event_context["conflict_type"],
                                 conflict_status=event_context["conflict_status"],
                                 conflict_severity=event_context["escalated_conflict_severity"],
-                                game_state=game_state
+                                game_state=game_state,
+                                requested_location=event_context.get("requested_location"),
                             )
 
                             self.apply_state_updates(
