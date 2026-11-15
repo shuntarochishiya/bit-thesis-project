@@ -7,6 +7,7 @@ import re
 import requests
 
 from agents.dialogue_validator_agent import DialogueValidatorAgent
+from memory.world_rumor_memory import excessive_shared_overlap, narrative_anchor, selected_pool_alignment
 from agents.world_facts import (
     grounded_reply, grounded_followup_reply, is_context_followup,
     is_news_question, is_news_followup, is_stock_question, news_followup_anchor,
@@ -215,6 +216,15 @@ class DialogueGeneratorAgent:
                 )
                 if request_issue:
                     return {"valid": False, "reason": request_issue}
+                if self._looks_like_old_transaction_receipt(reply):
+                    return {"valid": False, "reason": "Repeated a mechanical transaction receipt as NPC dialogue."}
+                if not selected_pool_alignment(reply, dialogue_context.get("world_rumors", [])):
+                    return {"valid": False, "reason": "The answer abandoned the selected world event. Develop the selected event in your own imaginative way instead of switching subjects."}
+                for rumor in dialogue_context.get("world_rumors", []):
+                    if (isinstance(rumor, dict) and rumor.get("knowledge") == "shared_rumor"
+                            and rumor.get("origin_npc") != target
+                            and excessive_shared_overlap(reply, rumor.get("origin_version", ""))):
+                        return {"valid": False, "reason": "Copied another NPC's rumor wording. Retell the same subject with your own phrasing and perspective."}
                 if missing_followup_subject(player_input, history, reply):
                     return {
                         "valid": False,
@@ -305,6 +315,18 @@ class DialogueGeneratorAgent:
                 generation_error=str(error)
             )
 
+    @staticmethod
+    def _looks_like_old_transaction_receipt(reply: str) -> bool:
+        """Reject only mechanical UI phrasing, never natural recollections.
+
+        'I remember your mead' is fine; 'You order mead for 5 coins' is not.
+        """
+        return bool(re.search(
+            r"\byou (?:order|ordered|purchase|purchased|buy|bought)\s+.{1,70}?"
+            r"\s+for\s+\d+\s+coins?\b|\byou now have\s+\d+\s+coins?\b",
+            reply or "", re.I,
+        ))
+
     def _build_repair_prompt(
         self,
         data: Dict[str, Any],
@@ -336,6 +358,10 @@ class DialogueGeneratorAgent:
             facts.append("Confirmed deliveries: " + str(confirmed_shipments(game_state, target)))
         if request_kind == "world_news":
             facts.append("Rumor topic guidance: " + grounded_news_reply(game_state, target))
+        for link in context.get("world_rumors", [])[:2]:
+            if isinstance(link, dict):
+                facts.append("Shared topic to retell from YOUR perspective: " +
+                             str(link.get("story_anchor") or narrative_anchor(link.get("story", ""), link.get("pool_event_id")))[:250])
         history = context.get("conversation_history", [])
         anchor = creative_followup_anchor(player_input, history)
         if anchor:
@@ -477,6 +503,11 @@ class DialogueGeneratorAgent:
             dialogue_context
         )
 
+        # Service receipts belong to mechanical memory, not NPC speech.
+        # At a bare greeting, suppress old service records completely.
+        if re.fullmatch(r"(?:hello|hi|hey|greetings|good day|hello there)[!. ]*", player_input, re.I):
+            memories = [m for m in memories if "past service" not in m.lower()]
+
         # A semantic hit containing an old, incorrect merchant answer is not
         # authoritative stock evidence. Avoid letting repeated delivery-news
         # responses dominate prompts about the *current* assortment.
@@ -498,6 +529,25 @@ class DialogueGeneratorAgent:
         )
         conversation_text = self._format_conversation_history(
             conversation_history
+        )
+        story_links = dialogue_context.get("world_rumors", [])
+        story_lines = []
+        for link in story_links[:2]:
+            if not isinstance(link, dict):
+                continue
+            story_lines.append(
+                f"- {link.get('rumor_id')}: "
+                f"{str(link.get('story_anchor') or narrative_anchor(link.get('story', ''), link.get('pool_event_id')))[:300]} "
+                f"[origin={link.get('origin_npc')}, "
+                f"status={link.get('status')}, "
+                f"knowledge={link.get('knowledge')}, "
+                f"your_version={str(link.get('npc_version') or 'not yet told')[:180]}]"
+            )
+        linked_stories = "\n".join(story_lines) if story_lines else "- None relevant."
+        older_dialogue = dialogue_context.get("prior_session_memories", [])
+        older_dialogue_text = (
+            self._format_conversation_history(older_dialogue)
+            if older_dialogue else "- No older conversation recalled for this request."
         )
         # A tavern purchase is a side action, not a new dialogue topic. Give
         # Qwen the earlier news turn explicitly when the player resumes it.
@@ -610,6 +660,18 @@ Situation-specific grounding guidance: {fact_guidance or "Normal conversation; n
 Recent dialogue:
 {conversation_text}
 {followup_guidance}
+Older conversations recalled with THIS NPC (not the current session):
+{older_dialogue_text}
+- Use older conversations only when relevant to the player's current request.
+- If the player asks about something previously discussed, acknowledge the shared story naturally; do not pretend it is a new event or a mechanical state change.
+- Do not automatically resume an old topic when greeted or asked about something else.
+Narrative rumor links (not mechanically completed events):
+{linked_stories}
+- These are PUBLIC rumors circulating locally, not private conversations. Different NPCs may know the same topic independently.
+- When a pool_event_id is supplied, use that pool event as the story anchor and freely add original narrative details. Never select an unrelated new event just because you can improvise.
+- If knowledge=own_version, you may recall your own prior telling. If knowledge=shared_rumor, you know the shared subject, NOT the original NPC's words. Retell it with your own perspective, attitude and extra details; avoid stock phrasing.
+- Treat the shared story as a starting point for improvisation, not as a confirmed mechanical game event.
+- Do not claim to have personally witnessed a rumor unless the game state confirms that.
 Relevant past events (may be incomplete; do not assume they are current facts):
 {memory_text}
 Personal beliefs (opinions, not objective facts):
@@ -623,6 +685,7 @@ Rules:
 - On a follow-up, elaborate on that subject FIRST. You may add new creative details of that subject; do not abruptly substitute a different story.
 - Feel free to invent wares, rumors, locations, lore and atmosphere. Creative dialogue does not itself change authoritative world state.
 - Never claim that money, inventory, health, quests, or other mechanical state changed unless the action result explicitly says so.
+- Past service actions are memories, NOT dialogue lines or current purchases. Never repeat system receipts such as "You order mead for 5 coins" or "You now have 45 coins".
 - Previously established narrative details should remain consistent when revisited; do not contradict the current game's mechanics.
 - No narration, speaker labels, system explanations, or technical inventory disclaimers.
 
@@ -1009,7 +1072,10 @@ NPC:""".strip()
 
             if player_text:
                 lines.append(f"Player: {player_text[:180]}")
-            if npc_text:
+            if str(turn.get("intent") or "") == "tavern_action":
+                # Never feed the verbatim transaction receipt back to the LLM.
+                lines.append(f"Past service action (already completed): {player_text[:100]}")
+            elif npc_text:
                 lines.append(f"NPC: {npc_text[:260]}")
 
         if not lines:
@@ -1043,6 +1109,8 @@ NPC:""".strip()
                     event_type = "dialogue"
                 # Long-term semantic recall is NOT a verified world-fact store.
                 # Preserve what the player asked, not an old LLM assertion.
+                if event_type in {"drink_order", "tavern_action"} or intent == "tavern_action":
+                    return f"past service (already completed): player requested {player!r}"
                 if event_type == "dialogue" or intent == "dialogue_action":
                     return f"past dialogue (unverified world claims omitted): player asked {player!r}"
                 return f"past interaction (not verified world state): player asked {player!r}"
@@ -1052,6 +1120,10 @@ NPC:""".strip()
             # A stored dialogue turn is a record of what was SAID, not proof
             # that an NPC's old claim changed the world. Preserve the player's
             # request for continuity, but not unverified LLM assertions.
+            if str(memory.get("intent", "")).lower() == "tavern_action":
+                return "past service (already completed): player requested " + repr(
+                    str(memory.get("player_input", memory.get("player", "")))[:130]
+                )
             if str(memory.get("intent", "")).lower() == "dialogue_action":
                 return "past dialogue (unverified): player asked " + repr(
                     str(memory.get("player_input", ""))[:130]

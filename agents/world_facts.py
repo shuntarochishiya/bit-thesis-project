@@ -6,7 +6,6 @@ event or treating old LLM dialogue as evidence. No network or LLM dependency.
 """
 from __future__ import annotations
 
-import hashlib
 import re
 from typing import Any, Dict, List, Optional
 
@@ -161,21 +160,18 @@ def format_verified_events(game_state: Dict[str, Any], target: str) -> str:
     )
 
 
-def _rumor_for(target: str, game_state: Dict[str, Any]) -> str:
-    location = str(game_state.get("location", ""))
-    # Stable choice for a location/NPC, not a random event roll.
-    choices = tuple(RUMOR_TEMPLATES)
-    digest = hashlib.sha256(f"{target}:{location}".encode("utf-8")).digest()
-    return RUMOR_TEMPLATES[choices[int.from_bytes(digest[:4], "big") % len(choices)]]
-
-
 def grounded_news_reply(game_state: Dict[str, Any], target: str) -> str:
+    """Emergency fallback only. The shared registry selects actual rumor topics.
+
+    No independent per-NPC hash selector: it previously contradicted the
+    event selection policy and kept repeating the same rumor after resets.
+    """
     events = public_events(game_state, target)
     if events:
         latest = events[0]
-        place = f" near {latest['location']}" if latest["location"] else ""
+        place = f" near {latest['location']}" if latest['location'] else ""
         return f"I've heard that {latest['report']}{place}. That's the latest confirmed report I know."
-    return "I haven't heard any confirmed news. " + _rumor_for(target, game_state)
+    return "I haven't heard any confirmed news, though rumors still circulate."
 
 
 def confirmed_shipments(game_state: Dict[str, Any], target: str) -> List[Dict[str, Any]]:

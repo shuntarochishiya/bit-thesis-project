@@ -71,6 +71,8 @@ def reset_all(game: Any, location: str | None = None) -> dict:
 
     # Clear disk-backed events BEFORE resetting in-memory manager state.
     game.memory_system.clear_memory()
+    # A new game must not inherit world rumors from the previous run.
+    game.execution_engine.world_rumors.clear()
 
     # IMPORTANT: do not replace the manager objects; the engine references them.
     game.game_state_manager.__init__()

@@ -5,6 +5,7 @@ import time
 from state.game_state_manager import GameStateManager
 from state.npc_state_manager import NPCStateManager
 from memory.memory_system import MemorySystem
+from memory.world_rumor_memory import WorldRumorMemory
 from memory.semantic_memory import SemanticMemorySystem
 from engine.execution_logger import ExecutionLogger
 from engine.fallback_manager import FallbackManager
@@ -67,6 +68,7 @@ class ExecutionEngine:
         self.npc_state_manager = npc_state_manager
         self.dag_scheduler = DAGScheduler()
         self.memory_system = memory_system
+        self.world_rumors = WorldRumorMemory(memory_system.memory_path)
         self.semantic_memory_system = semantic_memory_system
         self.execution_logger = execution_logger
         self.fallback_manager = fallback_manager
@@ -218,6 +220,22 @@ class ExecutionEngine:
             data["dialogue_context"] = dialogue_context
 
         dialogue_context["conversation_history"] = history
+        dialogue_context["prior_session_memories"] = (
+            self.memory_system.retrieve_prior_session_dialogue(
+                target=target, player_input=player_input, limit=2,
+            )
+        )
+        # Share public narrative rumors with local NPCs, but never transfer
+        # one NPC's private conversations or personal episodic memories.
+        rumor_store = getattr(self, "world_rumors", None)
+        dialogue_context["world_rumors"] = (
+            rumor_store.prepare_for_npc(
+                str(target or "").lower(), player_input,
+                location=str(self.game_state_manager.get_state().get("location", "")),
+            )
+            if rumor_store is not None else []
+        )
+        self._turn_rumor_links = list(dialogue_context["world_rumors"])
         dialogue_context["player_input"] = player_input
         dialogue_context["target"] = target
         return dialogue_decision
@@ -1566,6 +1584,27 @@ class ExecutionEngine:
                             state_before=state_before_turn,
                             state_after=state_after_action
                         )
+
+                        if intent in {"dialogue_action", "persuasion_action"}:
+                            # Narrative rumors are separate from mechanically
+                            # completed events and don't change game state.
+                            # Reuse the EXACT topic selected for generation.
+                            # Selecting a second time during memory write can
+                            # silently create a different rumor ID or advance
+                            # the pool without ever telling the selected story.
+                            remembered = getattr(self, "_turn_rumor_links", [])
+                            rumor_ids = self.world_rumors.record_dialogue(
+                                target, player_input, player_response or execution_result,
+                                delivered=remembered,
+                            )
+                            for rumor_id in rumor_ids:
+                                record = next((r for r in self.world_rumors.rumors
+                                               if r.get("rumor_id") == rumor_id), {})
+                                print("[WORLD RUMOR] rumor_id=" + rumor_id
+                                      + " event_source=" + str(record.get("source_type", "unknown"))
+                                      + " pool_event_id=" + str(record.get("pool_event_id"))
+                                      + " origin_npc=" + str(record.get("origin_npc"))
+                                      + " status=" + str(record.get("status")))
 
                         self.semantic_memory_system.add_event(memory_item)
 

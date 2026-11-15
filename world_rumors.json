@@ -1,0 +1,27 @@
+[
+  {
+    "rumor_id": "rumor_0001",
+    "story": "There is talk of bandits on the roads, though I have no confirmed report.",
+    "keywords": [
+      "bandits",
+      "confirmed",
+      "report",
+      "roads",
+      "talk",
+      "though"
+    ],
+    "origin_npc": "bartender",
+    "source_type": "static_pool",
+    "pool_event_id": "bandit_roadblock",
+    "status": "unconfirmed",
+    "location": "prototype_hub",
+    "known_by": [
+      "bartender"
+    ],
+    "versions": {
+      "bartender": "Hello there! I've been hearing whispers of a peculiar bandit roadblock near the forest edge. It seems travelers have reported strange signs and unexplained disappearances along that route. No confirmed details yet, but it's something worth investigating if you're looking to explore some lesser-known trails in our region. Would you care for a drink to share this tale?"
+    },
+    "created_at": "2026-11-13T10:03:13+00:00",
+    "tell_count": 1
+  }
+]

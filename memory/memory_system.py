@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 
@@ -110,6 +111,7 @@ class MemorySystem:
             "exploration_action",
             "combat_action",
             "dialogue_reset",  # persistent global boundary for all NPC threads
+            "scene_transition",  # Unity scene sync starts a new working session
         }
 
         matched: List[Dict[str, str]] = []
@@ -160,6 +162,74 @@ class MemorySystem:
             matched.append(latest_substantive)
         matched.reverse()
         return matched
+
+    def retrieve_prior_session_dialogue(
+        self,
+        target: Optional[str],
+        player_input: str,
+        limit: int = 2,
+    ) -> List[Dict[str, str]]:
+        """Recall older NPC-specific dialogue when the player refers to the past.
+
+        This is persistent episodic narrative context, NOT the active working
+        conversation. It never alters game state or implicitly resumes a topic.
+        Events are read from memory.json, so recall survives process restarts.
+        """
+        if not target or not player_input or limit <= 0:
+            return []
+
+        target_norm = str(target).strip().lower()
+        utterance = player_input.lower()
+        # Explicit reminders, or a meaningful subject referenced in the past.
+        recall_requested = bool(re.search(
+            r"\b(?:remember|recall|last time|earlier|previously|"
+            r"we (?:spoke|talked|discussed)|you (?:told|said|mentioned)|"
+            r"back (?:then|when)|again)\b", utterance,
+        ))
+        if not recall_requested:
+            return []
+
+        # Working conversation closes at movement, combat, explicit reset,
+        # or scene synchronization. Only events before that boundary qualify.
+        boundary = {"exploration_action", "combat_action", "dialogue_reset", "scene_transition"}
+        cut = None
+        for index in range(len(self.events) - 1, -1, -1):
+            event = self.events[index]
+            if isinstance(event, dict) and str(event.get("intent", "")).lower() in boundary:
+                cut = index
+                break
+        if cut is None:
+            return []  # There has not yet been a separate conversation session.
+
+        stopwords = {
+            "remember", "recall", "earlier", "previously", "again", "about", "that",
+            "those", "there", "where", "when", "what", "from", "with", "have", "said",
+            "told", "mentioned", "talked", "spoke", "discussed", "before", "last",
+            "time", "you", "your", "our", "the", "and", "were", "was", "did",
+            "we", "me", "can", "could", "some", "more", "this", "they", "them",
+        }
+        words = {w for w in re.findall(r"[a-z]{3,}", utterance) if w not in stopwords}
+        ranked = []
+        for index, item in enumerate(self.events[:cut]):
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("target", "")).strip().lower() != target_norm:
+                continue
+            if str(item.get("intent", "")).strip().lower() not in {"dialogue_action", "persuasion_action"}:
+                continue
+            player = str(item.get("player_input") or "").strip()
+            npc = str(item.get("system_result") or "").strip()
+            if not player or not npc:
+                continue
+            content = (player + " " + npc).lower()
+            score = sum(1 for word in words if re.search(r"\b" + re.escape(word) + r"\b", content))
+            # If the user names a topic, do not substitute a different memory.
+            if words and score == 0:
+                continue
+            ranked.append((score, index, {"player": player[:220], "npc": npc[:420]}))
+
+        ranked.sort(key=lambda x: (x[0], x[1]), reverse=True)
+        return [entry for _, _, entry in ranked[:limit]]
 
     def retrieve_recent_events(self, limit: int = 5) -> List[str]:
         formatted_events = []
