@@ -1,27 +1,29 @@
 [
   {
     "rumor_id": "rumor_0001",
-    "story": "There is talk of bandits on the roads, though I have no confirmed report.",
+    "story": "People speculate about forgotten ruins, but I have no proof of any discovery.",
     "keywords": [
-      "bandits",
-      "confirmed",
-      "report",
-      "roads",
-      "talk",
-      "though"
+      "discovery",
+      "forgotten",
+      "proof",
+      "ruins",
+      "speculate"
     ],
     "origin_npc": "bartender",
     "source_type": "static_pool",
-    "pool_event_id": "bandit_roadblock",
+    "pool_event_id": "old_ruin_discovery",
     "status": "unconfirmed",
     "location": "prototype_hub",
+    "offer_count": 2,
     "known_by": [
-      "bartender"
+      "bartender",
+      "merchant"
     ],
     "versions": {
-      "bartender": "Hello there! I've been hearing whispers of a peculiar bandit roadblock near the forest edge. It seems travelers have reported strange signs and unexplained disappearances along that route. No confirmed details yet, but it's something worth investigating if you're looking to explore some lesser-known trails in our region. Would you care for a drink to share this tale?"
+      "bartender": "Those whispers of treasure hint at hidden riches buried beneath the ruins. Legends speak of ancient artifacts and priceless jewels said to have belonged to powerful rulers long ago. Each clue uncovered could be a key piece in solving this mystery, leading us closer to unraveling its secrets. What do you wish to know more about?",
+      "merchant": "Hello there! People speculate that some forgotten ruins might be hiding in the outskirts of our town. It's quite mysterious and intriguing, isn't it? But as much as I wish to share more, I don’t have any concrete proof or news about a discovery yet. Wouldn't you like me to fetch someone who knows better though?"
     },
-    "created_at": "2026-11-13T10:03:13+00:00",
-    "tell_count": 1
+    "created_at": "2026-11-15T10:47:03+00:00",
+    "tell_count": 3
   }
 ]

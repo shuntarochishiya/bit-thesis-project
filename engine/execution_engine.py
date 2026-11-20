@@ -10,6 +10,7 @@ from memory.semantic_memory import SemanticMemorySystem
 from engine.execution_logger import ExecutionLogger
 from engine.fallback_manager import FallbackManager
 from engine.dag_scheduler import DAGScheduler
+from engine.tool_runtime import ToolRuntime, PRECONDITION_SPEC
 
 from agents.combat_agent import CombatAgent
 from agents.persuasion_agent import PersuasionAgent
@@ -74,6 +75,7 @@ class ExecutionEngine:
         self.fallback_manager = fallback_manager
         self.consequence_agent = consequence_agent
         self.precondition_agent = precondition_agent
+        self.tool_runtime = ToolRuntime()
 
         self.tavern_agent = tavern_agent
         self.event_agent = event_agent
@@ -559,24 +561,32 @@ class ExecutionEngine:
         intent: str,
         target: str,
     ):
-        checks: Dict[
-            str,
-            Callable[[str, str, Dict[str, Any], str], Dict[str, Any]]
-        ] = {
-            "validate_location": self.precondition_agent.validate_location,
-            "check_player_resources": self.precondition_agent.check_player_resources,
-            "check_target_status": self.precondition_agent.check_target_status,
+        methods = {
+            "validate_location": "validate_location",
+            "check_player_resources": "check_player_resources",
+            "check_target_status": "check_target_status",
         }
-
         check_name = task.get("check")
-        check_function = checks.get(check_name)
-        if check_function is None:
+        method_name = methods.get(check_name)
+        if method_name is None:
             raise ValueError(f"Unknown precondition check: {check_name}")
-        return check_function(
-            intent,
-            target,
-            game_state,
-            player_input,
+
+        # Resolve only the selected operation; test doubles and specialized
+        # agents need not implement unrelated precondition methods.
+        check_function = getattr(self.precondition_agent, method_name)
+        inputs = {
+            "intent": intent,
+            "target": target,
+            "game_state": game_state,
+            "player_input": player_input,
+        }
+        return self.tool_runtime.call(
+            PRECONDITION_SPEC,
+            lambda **kwargs: check_function(
+                kwargs["intent"], kwargs["target"],
+                kwargs["game_state"], kwargs["player_input"],
+            ),
+            inputs,
         )
 
 

@@ -127,6 +127,9 @@ class WorldRumorMemory:
         """
         for rumor in self.rumors:
             if rumor.get("pool_event_id") == event_id and rumor.get("location", "") == location:
+                rumor["offer_count"] = int(rumor.get("offer_count", 0)) + 1
+                self._save()
+                print(f"[WORLD RUMOR POOL] selected={event_id} rumor_id={rumor['rumor_id']} status=unconfirmed")
                 return rumor
         now = datetime.now(timezone.utc).isoformat(timespec="seconds")
         next_id = 1 + max((int(re.search(r"(\d+)$", r.get("rumor_id", "")).group(1))
@@ -137,7 +140,7 @@ class WorldRumorMemory:
             "keywords": sorted(keywords(template)), "origin_npc": npc,
             "source_type": "static_pool", "pool_event_id": event_id,
             "status": "unconfirmed", "location": location,
-            "known_by": [], "versions": {}, "created_at": now,
+            "offer_count": 1, "known_by": [], "versions": {}, "created_at": now,
         }
         self.rumors.append(rumor)
         self._save()
@@ -167,8 +170,14 @@ class WorldRumorMemory:
         never_told_pool = [eid for eid in RUMOR_TEMPLATES
                            if not pool_by_id.get(eid, {}).get("versions")]
         if never_told_pool:
-            chosen = random.choice(never_told_pool)
-            return self._seed_pool_rumor(chosen, npc, location)
+            # Count attempts separately from successful tellings. If Qwen
+            # keeps inventing an unrelated story, do not retry the same seed
+            # forever, or falsely mark it as already narrated.
+            minimum = min(int(pool_by_id.get(eid, {}).get("offer_count", 0))
+                          for eid in never_told_pool)
+            choices = [eid for eid in never_told_pool
+                       if int(pool_by_id.get(eid, {}).get("offer_count", 0)) == minimum]
+            return self._seed_pool_rumor(random.choice(choices), npc, location)
         # Existing shared tales are eligible, but don't monopolize the pool.
         candidates = list(records)
         if not candidates:
@@ -229,24 +238,33 @@ class WorldRumorMemory:
         if not npc or not reply or (not _CUES.search(reply) and not delivered):
             return []
         links = delivered or []
-        referenced = next((r for r in self.rumors
-                           if any(x.get("rumor_id") == r.get("rumor_id") for x in links)
-                           and (self._similarity(reply, r) >= .35 or
-                                self._similarity(player_input, r) >= .35)
-                           and (not r.get("pool_event_id") or
-                                selected_pool_alignment(reply, [r]))), None)
-        related = referenced or next((r for r in self.rumors if self._similarity(reply, r) >= .5 and (not r.get("pool_event_id") or selected_pool_alignment(reply, [r]))), None)
-        # A provided pool anchor identifies the story even when Qwen retells it
-        # without the exact original wording. Never infer a pool ID by copying
-        # arbitrary narrative text; only a unique subject can match it.
-        if related is None:
-            candidate_id = pool_subject(reply)
-            related = next((r for r in self.rumors if r.get("pool_event_id") == candidate_id), None) if candidate_id else None
+        # Selecting a candidate and actually telling it are different events.
+        # The model may invent a completely different story. Never record that
+        # unrelated narrative under a pool ID merely because it was offered as
+        # a seed; doing so corrupts shared NPC knowledge and pool rotation.
+        explicit_subject = pool_subject(reply)
+        delivered_ids = {link.get("rumor_id") for link in links if isinstance(link, dict)}
+        selected = next((r for r in self.rumors if r.get("rumor_id") in delivered_ids), None)
+        if selected is not None and selected.get("pool_event_id"):
+            if not selected_pool_alignment(reply, [{"pool_event_id": selected["pool_event_id"]}]):
+                # Unknown semantic equivalence is NOT grounds for throwing away
+                # a fluent LLM answer. But it is not proof of this pool event.
+                print("[WORLD RUMOR] selected_pool_unconfirmed=" +
+                      str(selected["pool_event_id"]) +
+                      " reason=reply_not_identifiably_about_seed; saving_separate_story")
+                selected = None
+        if selected is not None and explicit_subject and selected.get("pool_event_id") not in (None, explicit_subject):
+            selected = None
+        related = selected or next((r for r in self.rumors
+                                    if (not r.get("pool_event_id") or r.get("pool_event_id") == explicit_subject)
+                                    and self._similarity(reply, r) >= .5), None)
+        if related is None and explicit_subject:
+            related = next((r for r in self.rumors if r.get("pool_event_id") == explicit_subject), None)
         now = datetime.now(timezone.utc).isoformat(timespec="seconds")
         if related is None:
             next_id = 1 + max((int(re.search(r"(\d+)$", r.get("rumor_id", "")).group(1))
                                for r in self.rumors if re.search(r"\d+$", r.get("rumor_id", ""))), default=0)
-            pool_id = pool_subject(reply)
+            pool_id = explicit_subject
             source = "static_pool" if pool_id else "llm_generated"
             related = {
                 "rumor_id": f"rumor_{next_id:04d}", "story": reply[:650],

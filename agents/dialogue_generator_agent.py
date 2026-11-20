@@ -218,8 +218,13 @@ class DialogueGeneratorAgent:
                     return {"valid": False, "reason": request_issue}
                 if self._looks_like_old_transaction_receipt(reply):
                     return {"valid": False, "reason": "Repeated a mechanical transaction receipt as NPC dialogue."}
-                if not selected_pool_alignment(reply, dialogue_context.get("world_rumors", [])):
-                    return {"valid": False, "reason": "The answer abandoned the selected world event. Develop the selected event in your own imaginative way instead of switching subjects."}
+                # A pool event is a creative seed, not a lexical contract.
+                # Semantic rephrasings (whispers, echoes, eerie laughter, etc.)
+                # must never trigger an expensive retry or canned fallback.
+                # Narrative continuity is checked separately for explicit
+                # follow-ups, while game mechanics remain strictly validated.
+                if not selected_pool_alignment(reply, dialogue_context.get("world_rumors", [])) and self.debug:
+                    print("[NPC RUMOR] Soft topic mismatch (no retry): creative retelling retained.")
                 for rumor in dialogue_context.get("world_rumors", []):
                     if (isinstance(rumor, dict) and rumor.get("knowledge") == "shared_rumor"
                             and rumor.get("origin_npc") != target
@@ -513,6 +518,14 @@ class DialogueGeneratorAgent:
         # responses dominate prompts about the *current* assortment.
         if information_request_kind(player_input, target) == "stock_overview":
             memories = [m for m in memories if not self._stale_stock_answer(m)]
+        # A canonical rumor link is the authoritative narrative anchor for this
+        # turn. Old semantic hits are often similar but unrelated generated tales;
+        # including them competes with the chosen topic and adds prompt latency.
+        # Keep the working conversation and explicit cross-session recollections.
+        if dialogue_context.get("world_rumors") and not creative_followup_anchor(
+            player_input, dialogue_context.get("conversation_history", [])
+        ):
+            memories = []
         memory_text = self._format_memories(memories)
 
         semantic_beliefs = dialogue_context.get(
@@ -536,18 +549,18 @@ class DialogueGeneratorAgent:
             if not isinstance(link, dict):
                 continue
             story_lines.append(
-                f"- {link.get('rumor_id')}: "
+                f"- {link.get('rumor_id')} [pool_event_id={link.get('pool_event_id') or 'none'}]: "
                 f"{str(link.get('story_anchor') or narrative_anchor(link.get('story', ''), link.get('pool_event_id')))[:300]} "
                 f"[origin={link.get('origin_npc')}, "
                 f"status={link.get('status')}, "
                 f"knowledge={link.get('knowledge')}, "
                 f"your_version={str(link.get('npc_version') or 'not yet told')[:180]}]"
             )
-        linked_stories = "\n".join(story_lines) if story_lines else "- None relevant."
+        linked_stories = "\n".join(story_lines)
         older_dialogue = dialogue_context.get("prior_session_memories", [])
         older_dialogue_text = (
             self._format_conversation_history(older_dialogue)
-            if older_dialogue else "- No older conversation recalled for this request."
+            if older_dialogue else ""
         )
         # A tavern purchase is a side action, not a new dialogue topic. Give
         # Qwen the earlier news turn explicitly when the player resumes it.
@@ -638,57 +651,73 @@ class DialogueGeneratorAgent:
             if follow_up else
             "A brief greeting is allowed only if the player greets you."
         )
-        return f"""You are the {target}, speaking directly to the player in a fantasy RPG.
-Role boundaries: {role_guidance}
-Personality: {personality_text}
-Characteristic speaking style: {voice_text}
-Goals: {goals_text}
-Current emotion: {emotion}; tone: {tone}; attitude: trust={dialogue_context.get('trust', 'unknown')}, hostile={dialogue_context.get('hostile', False)}.
-Decision: {npc_intent}; topic={topic}; trade_allowed={allow_trade}; refusing={refuses_conversation}.
-Verified world context:
-{world_context}
-Recorded game events (mechanical state; dialogue may invent additional stories):
-{verified_event_text}
-Merchant inventory tracked by game mechanics: {stock_text}
-Situation-specific grounding guidance: {fact_guidance or "Normal conversation; no special factual claim required."}
-- The current game state is authoritative.
-- Past memories may describe previous locations.
-- Past NPC replies are narrative continuity: keep established story details consistent, but they do not mutate game state.
-- Do not mechanically resolve pending events just by talking about them.
-- You may introduce new places, people and rumors as creative fiction.
-- Never present a location from past memories as the player's current location.
-Recent dialogue:
-{conversation_text}
-{followup_guidance}
-Older conversations recalled with THIS NPC (not the current session):
-{older_dialogue_text}
-- Use older conversations only when relevant to the player's current request.
-- If the player asks about something previously discussed, acknowledge the shared story naturally; do not pretend it is a new event or a mechanical state change.
-- Do not automatically resume an old topic when greeted or asked about something else.
-Narrative rumor links (not mechanically completed events):
-{linked_stories}
-- These are PUBLIC rumors circulating locally, not private conversations. Different NPCs may know the same topic independently.
-- When a pool_event_id is supplied, use that pool event as the story anchor and freely add original narrative details. Never select an unrelated new event just because you can improvise.
-- If knowledge=own_version, you may recall your own prior telling. If knowledge=shared_rumor, you know the shared subject, NOT the original NPC's words. Retell it with your own perspective, attitude and extra details; avoid stock phrasing.
-- Treat the shared story as a starting point for improvisation, not as a confirmed mechanical game event.
-- Do not claim to have personally witnessed a rumor unless the game state confirms that.
-Relevant past events (may be incomplete; do not assume they are current facts):
-{memory_text}
-Personal beliefs (opinions, not objective facts):
-{belief_text}
+        # Assemble only relevant context sections, instead of repeating fixed
+        # instructions and empty memory placeholders on every Qwen request.
+        context_sections = []
+        if world_context != "- No additional verified world facts.":
+            context_sections.append("Current world state:\n" + world_context)
+        if verified_event_text != "- No confirmed public events are known to this NPC.":
+            context_sections.append("Completed public events:\n" + verified_event_text)
+        if target == "merchant" and verified_stock is not None:
+            context_sections.append("Mechanically available inventory: " + stock_text)
+        if conversation_history:
+            context_sections.append("Recent dialogue:\n" + conversation_text)
+        if followup_guidance:
+            context_sections.append(followup_guidance)
+        if older_dialogue_text:
+            context_sections.append(
+                "Older conversations recalled with THIS NPC (not the current session):\n"
+                + older_dialogue_text
+            )
+        if linked_stories:
+            selected = next((link for link in story_links if isinstance(link, dict)
+                             and link.get("pool_event_id")), None)
+            if selected:
+                # The chosen event is the central plot of THIS answer, not
+                # merely an optional example among remembered conversations.
+                context_sections.insert(0,
+                    "STORY ASSIGNMENT FOR THIS TURN (highest narrative priority):\n"
+                    + "Selected event ID: " + str(selected.get("pool_event_id")) + "\n"
+                    + "Tell the player a rumor ABOUT this situation: "
+                    + str(selected.get("pool_template") or selected.get("story_anchor") or "")
+                    + "\nThe central incident must be recognizable in your reply. "
+                    + "Open with the incident itself, then improvise any details, "
+                    + "people, motives and consequences. Do not substitute a "
+                    + "different adventure. This is only a rumor, not a completed game action.")
+            else:
+                context_sections.append("Shared public rumors (not completed events):\n" + linked_stories)
+        if memories:
+            context_sections.append("Relevant past interactions:\n" + memory_text)
+        if semantic_beliefs:
+            context_sections.append("Personal beliefs:\n" + belief_text)
+        if fact_guidance:
+            context_sections.append("Current request guidance: " + fact_guidance)
 
+        # Explicitly selected rumor outranks unrelated historical dialogue.
+        rumor_rule = (
+            "Selected rumor ID and subject are the anchor. Keep the SAME subject; "
+            "invent details freely, but don't switch to another event. "
+            "Different NPCs may know the same topic independently. "
+            "For shared_rumor, retell in YOUR voice rather than copying another NPC."
+            if linked_stories else ""
+        )
+        context_block = "\n".join(context_sections)
+        rumor_rule_line = "- " + rumor_rule if rumor_rule else ""
+        return f"""You are the {target} in a fantasy RPG. Reply as this NPC, in first person.
+Role: {role_guidance}
+Personality: {personality_text}; voice: {voice_text}; goals: {goals_text}.
+Emotion: {emotion}; tone: {tone}; trust={dialogue_context.get('trust', 'unknown')}; hostile={dialogue_context.get('hostile', False)}.
+NPC decision: {npc_intent}; topic: {topic}; trade_allowed={allow_trade}; refusing={refuses_conversation}.
+{context_block}
 Rules:
-- Answer the player's ACTUAL latest question, in character, in first person.
-- {opening_rule}
-- Usually 1-3 engaging sentences; expand when explicitly asked for a story.
-- Follow-up requests such as "tell me more" or "can you tell me more? I seek adventures" refer to the most recent substantive NPC story, even across service transactions.
-- On a follow-up, elaborate on that subject FIRST. You may add new creative details of that subject; do not abruptly substitute a different story.
-- Feel free to invent wares, rumors, locations, lore and atmosphere. Creative dialogue does not itself change authoritative world state.
-- Never claim that money, inventory, health, quests, or other mechanical state changed unless the action result explicitly says so.
-- Past service actions are memories, NOT dialogue lines or current purchases. Never repeat system receipts such as "You order mead for 5 coins" or "You now have 45 coins".
-- Previously established narrative details should remain consistent when revisited; do not contradict the current game's mechanics.
-- No narration, speaker labels, system explanations, or technical inventory disclaimers.
-
+- Answer the player's latest question directly, in character. {opening_rule}
+- Usually 1-3 lively sentences; tell more when asked. Keep established story details consistent.
+- When following up, continue the last substantive story, even after a service transaction.
+{rumor_rule_line}
+- You can creatively invent goods, rumors, characters, locations and lore; speech never changes mechanical state.
+- Do not claim money, inventory, quests, health, or completed events changed unless given a real action result.
+- Past service receipts are NOT NPC dialogue or new purchases; never repeat transaction messages.
+- No speaker labels, narration, system explanations or technical disclaimers.
 Player: {player_input}
 NPC:""".strip()
 

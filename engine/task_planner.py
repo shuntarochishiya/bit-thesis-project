@@ -11,6 +11,7 @@ import json
 from typing import Any, Dict, List
 
 from engine.dag_scheduler import DAGScheduler
+from engine.tool_contracts import ToolContractRegistry
 
 
 class TaskPlanner:
@@ -18,6 +19,7 @@ class TaskPlanner:
         self.template_path = template_path
         self.templates = self.load_templates()
         self.scheduler = DAGScheduler()
+        self.tool_contracts = ToolContractRegistry()
 
     def load_templates(self) -> Dict[str, Any]:
         try:
@@ -120,6 +122,7 @@ class TaskPlanner:
                 if has_player_history:
                     plan = self._add_npc_memory_node(plan)
 
+        self.tool_contracts.validate_plan(plan)
         self.scheduler.validate_plan(plan)
         return plan
 
